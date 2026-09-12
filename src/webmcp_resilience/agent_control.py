@@ -279,14 +279,19 @@ class ControlResult(BaseModel):
     bundle: dict[str, Any] | None = None
 
 
-def control_error(operation: str | None, message: str, *, code: str = "invalid_request") -> dict[str, Any]:
+def control_error(operation: str | None, message: str, *, code: str = "invalid_request",
+                  details: dict[str, Any] | None = None) -> dict[str, Any]:
     """Stable, redacted error envelope shared by stdio and tool callers."""
     return {
         "version": CONTROL_CONTRACT_VERSION,
         "operation": operation,
         "contract_version": CONTROL_CONTRACT_VERSION,
         "engine_version": ENGINE_VERSION,
-        "error": {"code": code, "message": redact_recursive(message)},
+        "error": {
+            "code": code,
+            "message": redact_recursive(message),
+            **({"details": redact_recursive(details)} if details is not None else {}),
+        },
     }
 
 
@@ -525,7 +530,7 @@ class LocalMCPControlAdapter:
 
     def _public_bundle(self, bundle: RunBundle) -> dict[str, Any]:
         """Project a bundle without exposing host paths or sensitive artifacts."""
-        payload = redact_recursive(bundle.model_dump(mode="json"))
+        payload = bundle.persisted_dict()
         payload["artifacts"] = [
             {
                 "kind": artifact.kind,
@@ -623,6 +628,14 @@ class LocalMCPControlAdapter:
                     "concurrency_limit": self.policy.concurrency_limit,
                 },
                 "tools": [item["name"] for item in tool_definitions()],
+                "tool_contract_drift": {
+                    "supported": True,
+                    "contract_version": "1.0",
+                    "fingerprint_fields": ["name", "input_schema", "output_schema", "annotations"],
+                    "descriptions_included": self.api.config.tool_contract_include_descriptions,
+                    "replay_rejection_code": "tool_contract_drift",
+                    "semantic_scope": "declared structural and observable contracts only",
+                },
             }
         if tool == "list_scenarios":
             root = self.policy.project_root / ".webmcp" / "scenarios"
@@ -714,6 +727,11 @@ class LocalMCPControlAdapter:
                         "created_at": item.created_at.isoformat(),
                         "artifact_kinds": sorted({artifact.kind for artifact in item.artifacts}),
                         "has_failure": any(artifact.kind == "failure" for artifact in item.artifacts),
+                        "tool_inventory_fingerprint": item.compatibility.tool_inventory_fingerprint,
+                        "tool_contract_drift": {
+                            "status": item.tool_contract_drift.get("status", "not_compared"),
+                            "policy_impact": item.tool_contract_drift.get("policy_impact", "none"),
+                        },
                     }
                     for item in page
                 ],
@@ -807,7 +825,10 @@ class LocalMCPControlAdapter:
         try:
             return {"ok": True, "result": await self.call(tool, request)}
         except CommandError as error:
-            return {"ok": False, "result": None, **control_error(tool, str(error), code=getattr(error, "code", "invalid_request"))}
+            return {"ok": False, "result": None, **control_error(
+                tool, str(error), code=getattr(error, "code", "invalid_request"),
+                details=getattr(error, "details", None),
+            )}
         except Exception as error:
             return {"ok": False, "result": None, **control_error(tool, str(error), code="internal_error")}
 
@@ -845,14 +866,14 @@ async def serve_stdio(adapter: LocalMCPControlAdapter) -> None:
         return {"jsonrpc": "2.0", "id": message_id, "result": result}
 
     def error_response(message_id: Any, code: int, message: str, operation: str | None = None,
-                       contract_code: str = "invalid_request") -> dict[str, Any]:
+                       contract_code: str = "invalid_request", details: dict[str, Any] | None = None) -> dict[str, Any]:
         return {
             "jsonrpc": "2.0",
             "id": message_id,
             "error": {
                 "code": code,
                 "message": message,
-                "data": control_error(operation, message, code=contract_code),
+                "data": control_error(operation, message, code=contract_code, details=details),
             },
         }
 
@@ -905,7 +926,10 @@ async def serve_stdio(adapter: LocalMCPControlAdapter) -> None:
                 operation = message.get("tool")
             if isinstance(message, dict) and message.get("method") == "tools/call":
                 operation = (message.get("params") or {}).get("name")
-            print(json.dumps(error_response(message_id, -32602, str(error), operation, getattr(error, "code", "invalid_request"))), flush=True)
+            print(json.dumps(error_response(
+                message_id, -32602, str(error), operation,
+                getattr(error, "code", "invalid_request"), getattr(error, "details", None),
+            )), flush=True)
         except Exception as error:
             message_id = message.get("id") if isinstance(message, dict) else None
             operation = message.get("method") if isinstance(message, dict) else None

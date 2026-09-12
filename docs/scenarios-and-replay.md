@@ -54,6 +54,35 @@ actors:
 
 Neither mechanism silently reads network traffic or arbitrary DOM content.
 
+## Optional tool contracts and observable result assertions
+
+Scenarios may declare expectations for only the tools whose contract matters to
+that scenario. A fingerprint is optional:
+
+```yaml
+tool_contracts:
+  reserve_inventory:
+    fingerprint: "<optional pinned per-tool fingerprint>"
+    required_inputs: [sku, quantity]
+    read_only: false
+    semantic_version: "1"
+    result_invariants:
+      - results.reserve_inventory.OK == 1
+    expected_result_codes: [OK, STALE_STATE]
+```
+
+Before any scenario action, live discovery checks the fingerprint (when
+present), required inputs, `annotations.readOnlyHint`, and semantic version.
+Semantic versions are explicit page declarations (`semanticVersion` or an
+annotation `semanticVersion`/`version`); the framework does not invent them.
+
+After invocation, `expected_result_codes` constrains observed `result.code`
+values and `result_invariants` uses the same deterministic comparison language
+as ordinary result invariants. Counts are exposed as
+`results.<tool>.<code>`. These assertions are limited to declared inputs,
+outputs, result codes, state invariants, and versions. They do not infer or
+prove unchanged business semantics.
+
 ## Faults
 
 | Fault | Timing | Effect |
@@ -93,15 +122,29 @@ or guess new arguments.
 .venv/bin/webmcp replay .webmcp/runs/<run-id>/bundle.json --ci --json
 ```
 
-Replay rejects incompatible artifacts, including a changed capability
-fingerprint. This is intentional: a bundle is evidence of a specific execution
-environment, not a request to reinterpret old behaviour against a new runtime.
+Replay rejects incompatible artifacts, including a changed browser capability
+fingerprint or canonical live tool-inventory fingerprint. A tool mismatch is a
+structured `tool_contract_drift` error containing only redacted added, removed,
+and changed tool names plus classified details. This is intentional: a bundle
+is evidence of a specific execution environment, not a request to reinterpret
+old behaviour against a new runtime. Legacy bundles without a recorded tool
+inventory fingerprint retain their previous replay behaviour.
 
 ## Evidence bundle
 
 `bundle.json` is the handoff contract. It includes compatibility requirements,
-browser evidence, preflight output, scenario, schedules, trace, state
-observations, policy approvals, artifacts, result, and replay command.
+browser evidence, preflight output, canonical redacted per-tool contracts and
+fingerprints, the complete inventory fingerprint, drift/expectation status,
+scenario, schedules, trace, state observations, policy approvals, artifacts,
+result, and replay command.
+
+`webmcp diff` and the console baseline comparison keep tool compatibility drift
+separate from behavioural drift. They report added, removed, changed input,
+changed output, changed annotations, descriptive-only, and unchanged tools.
+Breaking changes include removals, newly required inputs, narrowed enum/type,
+safety-annotation changes, and incompatible output shapes. Optional inputs and
+descriptive-only changes are compatible; unrecognized schema changes are
+reported as unknown for human review.
 
 Textual structured evidence and URL credentials are recursively redacted.
 Screenshots are marked potentially sensitive and remain metadata-only through

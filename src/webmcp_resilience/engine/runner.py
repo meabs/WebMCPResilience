@@ -43,6 +43,7 @@ class ScenarioRunner:
         self.base_url = base_url
         self.state: dict[str, Any] = {}
         self.result_counts: dict[str, dict[str, int]] = {}
+        self.result_code_observations: dict[str, list[str | None]] = {}
         self.tools: dict[str, dict[str, Any]] = {}
         self._adapter_stale = False
         page.on("framenavigated", self._on_navigation)
@@ -95,8 +96,44 @@ class ScenarioRunner:
         for expression in self.scenario.result_invariants:
             check(expression, {"results": self.result_counts})
             self.recorder.add("system", "result_invariant.pass", data={"expression": expression, "results": self.result_counts})
+        self._check_tool_contract_assertions()
         self.recorder.add("system", "scenario.end")
         return self.recorder.run
+
+    def _check_tool_contract_assertions(self) -> None:
+        """Evaluate only scenario-declared, observable result contracts."""
+        for name, expectation in self.scenario.tool_contracts.items():
+            observed = self.result_code_observations.get(name, [])
+            if expectation.expected_result_codes and observed:
+                allowed = set(expectation.expected_result_codes)
+                unexpected = sorted({code if code is not None else "<missing>" for code in observed if code not in allowed})
+                if unexpected:
+                    message = (
+                        f"{name} returned result codes outside the declared contract: {unexpected}; "
+                        f"expected one of {sorted(allowed)}"
+                    )
+                    self.recorder.add(
+                        "system", "tool_contract.assertion.fail", name=name,
+                        data={"assertion": "expected_result_codes", "expected": sorted(allowed), "observed": observed, "error": message},
+                    )
+                    raise InvariantError(message)
+                self.recorder.add(
+                    "system", "tool_contract.assertion.pass", name=name,
+                    data={"assertion": "expected_result_codes", "expected": sorted(allowed), "observed": observed},
+                )
+            for expression in expectation.result_invariants:
+                try:
+                    check(expression, {"results": self.result_counts})
+                    self.recorder.add(
+                        "system", "tool_contract.assertion.pass", name=name,
+                        data={"assertion": "result_invariant", "expression": expression, "results": self.result_counts},
+                    )
+                except (InvariantError, KeyError) as error:
+                    self.recorder.add(
+                        "system", "tool_contract.assertion.fail", name=name,
+                        data={"assertion": "result_invariant", "expression": expression, "results": self.result_counts, "error": str(error)},
+                    )
+                    raise InvariantError(str(error)) from error
 
     async def _install_http_faults(self) -> None:
         for fault in self.faults:
@@ -247,8 +284,12 @@ class ScenarioRunner:
                 try: result = json.loads(result)
                 except ValueError: pass
             if isinstance(result, dict) and "code" in result:
+                code = str(result["code"])
                 bucket = self.result_counts.setdefault(name, {})
-                bucket[result["code"]] = bucket.get(result["code"], 0) + 1
+                bucket[code] = bucket.get(code, 0) + 1
+            self.result_code_observations.setdefault(name, []).append(
+                str(result["code"]) if isinstance(result, dict) and "code" in result else None
+            )
             self.recorder.add(actor, "tool.result", name=name, invocation_id=invocation_id, data={"result": result})
             # A duplicate is an injected invocation, not a new opportunity to
             # inject the same declared fault.  Without this marker an

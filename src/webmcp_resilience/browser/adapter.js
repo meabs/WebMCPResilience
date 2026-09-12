@@ -16,7 +16,10 @@
         description: tool.description,
         inputSchema: typeof tool.inputSchema === 'string' ? JSON.parse(tool.inputSchema) : tool.inputSchema,
         outputSchema: typeof tool.outputSchema === 'string' ? JSON.parse(tool.outputSchema) : tool.outputSchema,
-        annotations: tool.annotations
+        annotations: tool.annotations,
+        // Explicit scenario expectations may validate this declaration. It is
+        // evidence only and is not part of the default compatibility hash.
+        semanticVersion: tool.semanticVersion
       }));
     },
     async invokeTool(name, args, invocationId) {

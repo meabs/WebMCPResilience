@@ -19,13 +19,14 @@ from .models.bundle import RunBundle, SUPPORTED_COMPATIBILITY_GROUPS, redact_rec
 
 
 HIDDEN_TRACE_EVENTS = {"tool.discovered", "tool.change"}
-FAILURE_EVENTS = {"tool.error", "invariant.fail", "result_invariant.fail"}
+FAILURE_EVENTS = {"tool.error", "invariant.fail", "result_invariant.fail", "tool_contract.assertion.fail"}
 
 
 def load_bundle(path: Path) -> RunBundle | None:
     """Load a portable bundle, returning ``None`` for a legacy bare trace."""
     try:
-        return RunBundle.model_validate(redact_recursive(json.loads(path.read_text())))
+        imported = RunBundle.model_validate(json.loads(path.read_text()))
+        return RunBundle.model_validate(imported.persisted_dict())
     except Exception:
         return None
 
@@ -132,6 +133,8 @@ class RunHistoryEntry:
     created_at: str
     seed: int | None
     browser_fingerprint: str | None
+    tool_inventory_fingerprint: str | None
+    tool_contract_drift_status: str
     mutation_authority: str
     artifact_kinds: tuple[str, ...]
     artifact_availability: dict[str, bool]
@@ -165,6 +168,8 @@ class RunHistory:
                 created_at=bundle.created_at.isoformat(),
                 seed=bundle.execution.get("seed"),
                 browser_fingerprint=bundle.compatibility.capability_fingerprint,
+                tool_inventory_fingerprint=bundle.compatibility.tool_inventory_fingerprint,
+                tool_contract_drift_status=str(bundle.tool_contract_drift.get("status", "not_compared")),
                 mutation_authority=authority,
                 artifact_kinds=tuple(sorted({item.kind for item in bundle.artifacts})),
                 artifact_availability={item.kind: True for item in bundle.artifacts},

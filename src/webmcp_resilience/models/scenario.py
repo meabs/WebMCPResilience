@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import AliasChoices, BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 
 SUPPORTED_FAULT_TIMINGS: dict[str, set[str]] = {
@@ -67,6 +67,26 @@ class StateProvider(BaseModel):
     path: str | None = None
 
 
+class ToolContractExpectation(BaseModel):
+    """Optional structural and observable expectations for one named tool."""
+
+    model_config = ConfigDict(extra="forbid")
+    fingerprint: str | None = None
+    required_inputs: list[str] = Field(default_factory=list)
+    read_only: bool | None = None
+    semantic_version: str | None = None
+    result_invariants: list[str] = Field(default_factory=list)
+    expected_result_codes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def unique_declarations(self) -> "ToolContractExpectation":
+        if len(self.required_inputs) != len(set(self.required_inputs)):
+            raise ValueError("required_inputs must not contain duplicates")
+        if len(self.expected_result_codes) != len(set(self.expected_result_codes)):
+            raise ValueError("expected_result_codes must not contain duplicates")
+        return self
+
+
 class Scenario(BaseModel):
     name: str = Field(validation_alias=AliasChoices("name", "scenario"))
     url: str = "/"
@@ -75,5 +95,6 @@ class Scenario(BaseModel):
     invariants: list[str] = Field(default_factory=list)
     state: StateProvider | None = None
     result_invariants: list[str] = Field(default_factory=list)
+    tool_contracts: dict[str, ToolContractExpectation] = Field(default_factory=dict)
     compatibility: dict[str, Any] = Field(default_factory=lambda: {"schema": "webmcp-resilience/scenario-1", "requires": {"scenario": "1", "fault_model": "1", "invariant_model": "1", "trace_model": "1", "browser_webmcp_adapter": "1"}})
     metadata: dict[str, Any] = Field(default_factory=dict)

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
 
@@ -12,7 +14,7 @@ from typer.testing import CliRunner
 
 from webmcp_resilience.agent_control import AgentPolicy, LocalMCPControlAdapter
 from webmcp_resilience.cli import app
-from webmcp_resilience.commands import CommandAPI
+from webmcp_resilience.commands import CommandAPI, ToolContractDriftError
 from webmcp_resilience.config import Config
 from webmcp_resilience.console_commands import ConsoleCommandModule
 from webmcp_resilience.demo import create_server
@@ -21,6 +23,11 @@ from webmcp_resilience.tui import TraceConsole
 
 
 pytestmark = pytest.mark.e2e
+
+
+class _QuietDirectoryHandler(SimpleHTTPRequestHandler):
+    def log_message(self, *_args: object) -> None:
+        return
 
 
 @pytest.fixture
@@ -51,6 +58,25 @@ def decode(output: str) -> dict:
         except json.JSONDecodeError:
             continue
     raise AssertionError(f"no JSON response in output: {output!r}")
+
+
+def contract_page(*, quantity_required: bool) -> str:
+    required = ", required: ['quantity']" if quantity_required else ""
+    return f"""<!doctype html><html><body><script type="module">
+const tools = [];
+document.modelContext = {{
+  async registerTool(tool) {{ tools.push(tool); }},
+  async getTools() {{ return tools; }},
+  async executeTool(tool, json) {{ return tool.execute(JSON.parse(json)); }},
+}};
+await document.modelContext.registerTool({{
+  name: 'reserve_inventory',
+  inputSchema: {{type: 'object', properties: {{quantity: {{type: 'integer'}}}}{required}}},
+  outputSchema: {{type: 'object', properties: {{code: {{type: 'string'}}}}, required: ['code']}},
+  annotations: {{readOnlyHint: true, semanticVersion: '1'}},
+  execute: () => ({{code: 'OK'}}),
+}});
+</script></body></html>"""
 
 
 def test_cli_full_loop_replays_a_redacted_adversarial_failure(
@@ -180,6 +206,44 @@ def test_local_mcp_control_executes_the_same_loop_and_policy(
     }))
     assert replayed["result"]["passed"] is False
     assert replayed["bundle"]["execution"]["schedule"] == executed["bundle"]["execution"]["schedule"]
+
+
+def test_browser_backed_replay_rejects_changed_tool_contract(tmp_path: Path) -> None:
+    site = tmp_path / "contract-site"
+    site.mkdir()
+    page = site / "index.html"
+    page.write_text(contract_page(quantity_required=False))
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", 0), partial(_QuietDirectoryHandler, directory=str(site))
+    )
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        api = CommandAPI(Config(base_url=base_url), output_dir=tmp_path / ".webmcp" / "runs")
+        scenario = {
+            "name": "contract-replay",
+            "actors": {"agent": [{"invoke": "reserve_inventory", "args": {"quantity": 1}}]},
+            "tool_contracts": {"reserve_inventory": {
+                "read_only": True,
+                "semantic_version": "1",
+                "expected_result_codes": ["OK"],
+            }},
+        }
+        baseline = asyncio.run(api.run(scenario=scenario, run_id="contract-baseline", headless=True))
+        assert baseline.result["passed"] is True
+        assert baseline.tool_contract_expectations["semantic_assertions"]["status"] == "passed"
+        baseline_path = api.save(baseline)
+        page.write_text(contract_page(quantity_required=True))
+        with pytest.raises(ToolContractDriftError) as caught:
+            asyncio.run(api.replay(baseline_path, run_id="contract-replay", headless=True))
+        assert caught.value.code == "tool_contract_drift"
+        assert caught.value.details["changed_input_schemas"] == ["reserve_inventory"]
+        assert caught.value.details["policy_impact"] == "breaking"
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
 
 
 async def _wait_for_console_detail(app: TraceConsole, pilot: object, needle: str) -> str:

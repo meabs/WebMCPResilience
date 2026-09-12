@@ -17,6 +17,7 @@ from .console import show_trace
 from .console_commands import ConsoleCommandModule
 from .tui import run_composer, run_console, run_history
 from .agent_control import AgentPolicy, LocalMCPControlAdapter, serve_stdio
+from .tool_contracts import concise_drift_lines
 
 app = typer.Typer(help="Portable resilience evidence for WebMCP applications.", pretty_exceptions_enable=False)
 console = Console()
@@ -43,6 +44,8 @@ def _emit(bundle: RunBundle | dict, *, json_output: bool, output: Path | None = 
         if bundle.command == "preflight":
             counts = bundle.result.get("finding_counts", {})
             summary += f"\nWebMCP compatibility: {bundle.result.get('status', 'unknown')} · findings: " + ", ".join(f"{key}={value}" for key, value in sorted(counts.items()))
+            if lines := concise_drift_lines(bundle.tool_contract_drift):
+                summary += "\n" + "\n".join(lines)
         if not bundle.result.get("passed", True):
             handoff = bundle.result.get("failure_handoff") or failure_handoff(bundle, Path(payload["output"]))
             console.print(
@@ -50,6 +53,9 @@ def _emit(bundle: RunBundle | dict, *, json_output: bool, output: Path | None = 
                 f"Failed invariant: {handoff.get('failed_invariant') or 'unknown'}\n"
                 f"Observed state: {json.dumps(handoff.get('observed_state', {}), sort_keys=True)}\n"
                 f"Capability fingerprint: {handoff.get('capability_fingerprint') or 'unknown'}\n"
+                f"Tool inventory fingerprint: {handoff.get('tool_inventory_fingerprint') or 'unknown'}\n"
+                f"Tool contract drift: {(handoff.get('tool_contract_drift') or {}).get('status', 'not_compared')} "
+                f"({(handoff.get('tool_contract_drift') or {}).get('policy_impact', 'none')})\n"
                 f"Bundle: {handoff.get('bundle_path') or payload['output']}\n"
                 f"Reduced repro: {handoff.get('reduced_repro_path') or 'none'}\n"
                 f"Replay: {' '.join(handoff.get('replay_command') or bundle.replay_command)}"
@@ -58,10 +64,14 @@ def _emit(bundle: RunBundle | dict, *, json_output: bool, output: Path | None = 
             console.print(f"{summary}\nBundle: {payload['output']}")
     else:
         console.print_json(json.dumps(payload, default=str))
+        if lines := concise_drift_lines(payload.get("tool_contract_drift", {})):
+            console.print("\n".join(lines))
 
 
 def _command_error(error: Exception, json_output: bool) -> None:
     payload = {"schema_version": "1.0", "contract_version": "1.0", "engine_version": ENGINE_VERSION, "error": str(error), "error_code": getattr(error, "code", "internal_error"), "exit_code": 2}
+    if hasattr(error, "details"):
+        payload["details"] = getattr(error, "details")
     if json_output: print(json.dumps(payload, sort_keys=True))
     else: console.print(f"[red]Error:[/red] {payload['error']}")
     raise typer.Exit(2)
@@ -142,8 +152,15 @@ def handoff(bundle: Path, output: Path | None = typer.Option(None, "--output"), 
     """Export redacted Markdown/JSON incident metadata without evidence contents."""
     try:
         outputs = _api(Path(".webmcp/runs")).export_handoff(bundle, output)
-        payload = {"schema_version": "1.0", "contract_version": "1.0", "outputs": {key: str(value) for key, value in outputs.items()}}
-        print(json.dumps(payload, sort_keys=True)) if json_output else console.print(f"Markdown: {outputs['markdown']}\nJSON: {outputs['json']}")
+        summary = json.loads(outputs["json"].read_text())
+        payload = {"schema_version": "1.0", "contract_version": "1.0", "outputs": {key: str(value) for key, value in outputs.items()},
+                   "tool_inventory_fingerprint": summary.get("tool_inventory_fingerprint"),
+                   "tool_contract_drift": summary.get("tool_contract_drift", {})}
+        if json_output:
+            print(json.dumps(payload, sort_keys=True))
+        else:
+            drift = payload["tool_contract_drift"]
+            console.print(f"Tool contract: {drift.get('status', 'not_compared')} ({drift.get('policy_impact', 'none')})\nMarkdown: {outputs['markdown']}\nJSON: {outputs['json']}")
     except Exception as error: _command_error(error, json_output)
 
 
@@ -200,6 +217,9 @@ def demo_race(host: str = "127.0.0.1", port: int = 4173,
                     f"Failed invariant: {failed_handoff.get('failed_invariant') or 'unknown'}\n"
                     f"Observed state: {json.dumps(failed_handoff.get('observed_state', {}), sort_keys=True)}\n"
                     f"Capability fingerprint: {failed_handoff.get('capability_fingerprint') or 'unknown'}\n"
+                    f"Tool inventory fingerprint: {failed_handoff.get('tool_inventory_fingerprint') or 'unknown'}\n"
+                    f"Tool contract drift: {(failed_handoff.get('tool_contract_drift') or {}).get('status', 'not_compared')} "
+                    f"({(failed_handoff.get('tool_contract_drift') or {}).get('policy_impact', 'none')})\n"
                     f"Bundle: {failed_handoff.get('bundle_path')}\n"
                     f"Reduced repro: {failed_handoff.get('reduced_repro_path') or 'none'}\n"
                     f"Replay: {' '.join(failed_handoff.get('replay_command') or [])}"

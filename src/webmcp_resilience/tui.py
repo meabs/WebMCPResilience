@@ -158,7 +158,8 @@ class TraceConsole(App[None]):
         return (f"ACTOR EVENTS  {actor_text}    STATE DIFFS  {state_versions}    TOOL CALLS  {calls}    "
                 f"FAULTS  {faults}    FAILURES  {failures}    RESULT  {result}\n"
                 f"POLICY  {authority}    APPROVALS  {len(approvals)}    REDACTION  {'on' if redaction else 'off'}    "
-                f"SENSITIVE ARTIFACTS  metadata-only    FILTERS  {filter_text}    {comparison}    [r] replay  [m] minimized repro")
+                f"SENSITIVE ARTIFACTS  metadata-only    TOOL CONTRACT  {(self.bundle.tool_contract_drift.get('status', 'not_compared') if self.bundle else 'unknown')}    "
+                f"FILTERS  {filter_text}    {comparison}    [r] replay  [m] minimized repro")
 
     @staticmethod
     def _event_counts(trace: dict) -> Counter[tuple[str, str, str, str]]:
@@ -253,7 +254,7 @@ class TraceConsole(App[None]):
         removed = baseline - current
         lines = [f"Bundle comparison: current {self.trace_path.name} vs baseline {self.compare_path.name}", ""]
         if self.bundle and self.compare_bundle:
-            lines.append(json_text(bundle_comparison(self.bundle, self.compare_bundle)) + "")
+            lines.append(json_text(bundle_comparison(self.compare_bundle, self.bundle)) + "")
         lines += [f"+ {count} × {actor} · {event_type} · {name} {code}" for (actor, event_type, name, code), count in added.items()]
         lines += [f"- {count} × {actor} · {event_type} · {name} {code}" for (actor, event_type, name, code), count in removed.items()]
         self._set_detail("\n".join(lines) if len(lines) > 2 else "Traces have the same actor/event counts.")
@@ -362,7 +363,7 @@ class HistoryConsole(App[None]):
     def _item(index: int, entry: Any) -> ListItem:
         marker = "✓" if entry.status == "passed" else "✕" if entry.status == "failed" else "?"
         artifacts = ",".join(entry.artifact_kinds) or "none"
-        text = f"{marker} {entry.run_id:<24} {entry.scenario or '-':<22} {entry.status:<7} seed={entry.seed} artifacts={artifacts}"
+        text = f"{marker} {entry.run_id:<24} {entry.scenario or '-':<22} {entry.status:<7} seed={entry.seed} contract={entry.tool_contract_drift_status} artifacts={artifacts}"
         return ListItem(Label(text), id=f"history-{index}")
 
     def on_list_view_selected(self, message: ListView.Selected) -> None:
@@ -372,6 +373,8 @@ class HistoryConsole(App[None]):
             "run_id": entry.run_id, "scenario": entry.scenario, "status": entry.status,
             "created_at": entry.created_at, "seed": entry.seed,
             "browser_fingerprint": entry.browser_fingerprint,
+            "tool_inventory_fingerprint": entry.tool_inventory_fingerprint,
+            "tool_contract_drift_status": entry.tool_contract_drift_status,
             "mutation_authority": entry.mutation_authority,
             "artifact_availability": entry.artifact_availability, "bundle": str(entry.path),
         }))
@@ -405,7 +408,7 @@ class HistoryConsole(App[None]):
         if current is None or baseline is None:
             self._set_detail("Selected bundle is not a valid portable bundle.")
             return
-        self._set_detail(json_text(bundle_comparison(current, baseline)))
+        self._set_detail(json_text(bundle_comparison(baseline, current)))
 
     def action_repro(self) -> None:
         entry = self._entry()

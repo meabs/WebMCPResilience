@@ -11,6 +11,9 @@ class Config(BaseModel):
     state_script: str | None = None
     browser_args: list[str] = Field(default_factory=list)
     from_origins: list[str] = Field(default_factory=list)
+    # Descriptions are excluded from compatibility fingerprints by default.
+    # Projects may explicitly opt in when prose is part of their contract.
+    tool_contract_include_descriptions: bool = False
 
 
 def load_config(project: Path = Path(".webmcp")) -> Config:

@@ -117,6 +117,7 @@ class Compatibility(BaseModel):
     browser_version: str | None = None
     headless: bool | None = None
     capability_fingerprint: str | None = None
+    tool_inventory_fingerprint: str | None = None
     groups: CompatibilityRequirements = Field(default_factory=CompatibilityRequirements.installed)
 
 
@@ -166,6 +167,13 @@ class RunBundle(BaseModel):
     scenario: dict[str, Any] | None = None
     browser_environment: dict[str, Any] = Field(default_factory=dict)
     tool_inventory: list[dict[str, Any]] = Field(default_factory=list)
+    inventory_contract: dict[str, Any] = Field(default_factory=dict)
+    tool_contract_drift: dict[str, Any] = Field(default_factory=lambda: {
+        "version": "1.0", "status": "not_compared", "changed": False, "policy_impact": "none"
+    })
+    tool_contract_expectations: dict[str, Any] = Field(default_factory=lambda: {
+        "version": "1.0", "status": "not_declared", "passed": True, "checks": [], "failures": []
+    })
     actions: list[dict[str, Any]] = Field(default_factory=list)
     faults: list[dict[str, Any]] = Field(default_factory=list)
     state_changes: list[dict[str, Any]] = Field(default_factory=list)
@@ -192,4 +200,24 @@ class RunBundle(BaseModel):
 
     def persisted_dict(self) -> dict[str, Any]:
         """The only machine-readable representation allowed to leave memory."""
-        return redact_recursive(self.model_dump(mode="json"))
+        # Tool schemas need a context-aware redactor: names such as
+        # ``access_token`` are structural, while their defaults/examples may
+        # still be sensitive. The local import avoids a module import cycle.
+        from ..tool_contracts import redact_inventory_contract, redact_tool_inventory
+
+        payload = self.model_dump(mode="json")
+        inventory = payload.pop("tool_inventory", [])
+        inventory_contract = payload.pop("inventory_contract", {})
+        preflight_inventory_contract = (
+            payload.get("preflight", {}).get("inventory_contract", {})
+            if isinstance(payload.get("preflight"), dict)
+            else {}
+        )
+        safe = redact_recursive(payload)
+        safe["tool_inventory"] = redact_tool_inventory(inventory)
+        safe["inventory_contract"] = redact_inventory_contract(inventory_contract)
+        if preflight_inventory_contract and isinstance(safe.get("preflight"), dict):
+            safe["preflight"]["inventory_contract"] = redact_inventory_contract(
+                preflight_inventory_contract
+            )
+        return safe

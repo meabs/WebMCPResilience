@@ -38,9 +38,10 @@ def show_trace(path: Path, console: Console, compare: Path | None = None) -> Non
         safe_artifacts = sum(item.redacted and item.sensitivity == "redacted" for item in bundle.artifacts) if bundle else 0
         metadata_only = sum(not (item.redacted and item.sensitivity == "redacted") for item in bundle.artifacts) if bundle else 0
         if bundle is not None and baseline is not None:
-            diff = bundle_comparison(bundle, baseline)
+            diff = bundle_comparison(baseline, bundle)
             console.print(f"[cyan]bundle comparison[/cyan] · result changed={diff['result_changed']} · "
-                          f"browser changed={diff['browser_changed']} · events +{len(diff['events_only_left'])}/-{len(diff['events_only_right'])}")
+                          f"browser changed={diff['browser_changed']} · tool contract={diff['tool_contract_drift']['status']} "
+                          f"({diff['tool_contract_drift']['policy_impact']}) · events +{len(diff['events_only_left'])}/-{len(diff['events_only_right'])}")
         else:
             current_events = {(event.get("actor"), event.get("type"), event.get("name")) for event in trace.get("events", [])}
             baseline_events = {(event.get("actor"), event.get("type"), event.get("name")) for event in baseline_payload.get("events", [])}
@@ -52,6 +53,7 @@ def show_trace(path: Path, console: Console, compare: Path | None = None) -> Non
         authority = approvals[-1].authority if approvals else "read_only"
         console.print(f"[dim]run={bundle.run_id} · result={'PASS' if bundle.result.get('passed') else 'FAIL'} · "
                       f"seed={bundle.execution.get('seed')} · capability={bundle.compatibility.capability_fingerprint or 'unknown'} · "
+                      f"tool-contract={bundle.compatibility.tool_inventory_fingerprint or 'unknown'} · drift={bundle.tool_contract_drift.get('status', 'not_compared')} · "
                       f"authority={authority} · sensitive artifacts=metadata-only[/dim]")
     if baseline is not None:
         console.print(f"[dim]safe redacted artifacts={safe_artifacts} · metadata-only artifacts={metadata_only}[/dim]")

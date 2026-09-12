@@ -22,6 +22,14 @@ from .engine import ScenarioRunner, reduce_failure, schedules
 from .engine.explorer import ScheduledAction
 from .engine.invariants import InvariantError, validate_syntax
 from .security import agent_policy_snapshot, canonical_origin, resolve_navigation_url, validate_scenario_navigation
+from .tool_contracts import (
+    build_inventory_contract,
+    compare_tool_inventories,
+    concise_drift_lines,
+    no_contract_comparison,
+    redact_tool_inventory,
+    validate_contract_expectations,
+)
 
 
 WEBMCP_COMPATIBILITY_REPORT_VERSION = "1.0"
@@ -138,6 +146,7 @@ def build_webmcp_compatibility_report(
     inventory_before: list[dict[str, Any]] | None = None,
     inventory_error: str | None = None,
     state_observation: StateObservation | None = None,
+    include_contract_descriptions: bool = False,
 ) -> dict[str, Any]:
     """Build the browser-native, non-mutating WebMCP compatibility report."""
     api = probe.get("api", {})
@@ -146,10 +155,19 @@ def build_webmcp_compatibility_report(
     runtime = probe.get("runtime", {})
     lifecycle = probe.get("lifecycle", {})
     tools = [_inventory_entry(tool, index) for index, tool in enumerate(inventory)]
-    before_names = [tool.get("name") for tool in (inventory_before or inventory) if isinstance(tool, dict)]
+    baseline_inventory = inventory if inventory_before is None else inventory_before
+    before_names = [tool.get("name") for tool in baseline_inventory if isinstance(tool, dict)]
     after_names = [tool.get("name") for tool in inventory if isinstance(tool, dict)]
     added = sorted(set(after_names) - set(before_names))
     removed = sorted(set(before_names) - set(after_names))
+    inventory_contract = build_inventory_contract(
+        inventory, include_descriptions=include_contract_descriptions
+    )
+    contract_drift = compare_tool_inventories(
+        baseline_inventory,
+        inventory,
+        include_descriptions=include_contract_descriptions,
+    )
     findings: list[dict[str, Any]] = []
 
     if not api.get("available"):
@@ -272,6 +290,11 @@ def build_webmcp_compatibility_report(
             "tool-inventory-changed", "warning", "Investigate dynamic tool registration and rerun preflight before relying on the inventory.",
             "tool_inventory.changes", {"added": added, "removed": removed}, title="Tool inventory changed during preflight",
         ))
+    elif contract_drift["changed"]:
+        findings.append(_finding(
+            "tool-contract-drift", "warning", "Investigate schema or annotation mutation and rerun preflight before relying on the inventory.",
+            "tool_contract_drift", contract_drift, title="Tool contract changed during preflight",
+        ))
 
     counts = Counter(item["severity"] for item in findings)
     status = "unsupported" if counts["error"] else "degraded" if counts["warning"] else "compatible"
@@ -308,6 +331,8 @@ def build_webmcp_compatibility_report(
         "state_observation": state_observation.model_dump(mode="json") if state_observation else build_state_observation(Config()).model_dump(mode="json"),
         "tool_inventory": tools,
         "inventory_changes": {"observed": bool(added or removed), "added": added, "removed": removed},
+        "inventory_contract": inventory_contract,
+        "tool_contract_drift": contract_drift,
         "findings": findings,
         "summary": {
             "status": status,
@@ -315,7 +340,11 @@ def build_webmcp_compatibility_report(
             "tool_count": len(tools),
         },
     }
-    return redacted(report)
+    safe_report = redacted(report)
+    # The contract module has already redacted this with schema awareness;
+    # retain secret-looking property names as useful structure.
+    safe_report["inventory_contract"] = inventory_contract
+    return safe_report
 
 
 class CommandError(RuntimeError):
@@ -323,6 +352,30 @@ class CommandError(RuntimeError):
 
     exit_code = 2
     code = "invalid_request"
+
+
+class ToolContractDriftError(CommandError):
+    """A replay was rejected because its saved inventory contract changed."""
+
+    code = "tool_contract_drift"
+
+    def __init__(self, report: dict[str, Any]) -> None:
+        self.details = redacted(report)
+        lines = concise_drift_lines(self.details)
+        super().__init__("unsafe replay rejected: " + ("\n".join(lines) if lines else "tool inventory fingerprint differs"))
+
+
+class ToolContractExpectationError(CommandError):
+    """A scenario's explicit live-contract expectation did not hold."""
+
+    code = "tool_contract_expectation_failed"
+
+    def __init__(self, report: dict[str, Any]) -> None:
+        self.details = redacted(report)
+        messages = "; ".join(
+            f"{item.get('tool')}: {item.get('message')}" for item in self.details.get("failures", [])
+        )
+        super().__init__(f"tool contract expectation failed: {messages or 'live contract did not match'}")
 
 
 class PolicyDeniedError(CommandError):
@@ -379,14 +432,16 @@ def failure_handoff(bundle: RunBundle, bundle_path: Path | None = None) -> dict[
     """Return the compact, portable handoff shared by CLI and control clients."""
     failed = next(
         (event for event in reversed(bundle.trace.events if bundle.trace else [])
-         if event.type in {"invariant.fail", "result_invariant.fail"}),
+         if event.type in {"invariant.fail", "result_invariant.fail", "tool_contract.assertion.fail"}),
         None,
     )
     reduced = next((artifact.path for artifact in bundle.artifacts if artifact.kind == "scenario"), None)
     return {
-        "failed_invariant": (failed.data.get("expression") if failed else None),
+        "failed_invariant": (failed.data.get("expression") or failed.data.get("assertion") if failed else None),
         "observed_state": redacted(failed.state_snapshot if failed else {}),
         "capability_fingerprint": bundle.compatibility.capability_fingerprint,
+        "tool_inventory_fingerprint": bundle.compatibility.tool_inventory_fingerprint,
+        "tool_contract_drift": redacted(bundle.tool_contract_drift),
         "bundle_path": str(bundle_path) if bundle_path else None,
         "reduced_repro_path": reduced,
         "replay_command": list(bundle.replay_command),
@@ -495,6 +550,7 @@ class CommandAPI:
                 inventory_before=inventory_before,
                 inventory_error=inventory_error,
                 state_observation=state_observation,
+                include_contract_descriptions=self.config.tool_contract_include_descriptions,
             )
             fingerprint = hashlib.sha256(json.dumps(redacted(report), sort_keys=True).encode()).hexdigest()[:16]
             bundle.compatibility = Compatibility(
@@ -502,11 +558,14 @@ class CommandAPI:
                 browser_version=environment["version"],
                 headless=headless,
                 capability_fingerprint=fingerprint,
+                tool_inventory_fingerprint=report["inventory_contract"]["inventory_fingerprint"],
             )
             bundle.preflight = report
             bundle.state_observation = state_observation
             bundle.browser_environment = redacted(environment)
-            bundle.tool_inventory = redacted(inventory)
+            bundle.tool_inventory = redact_tool_inventory(inventory)
+            bundle.inventory_contract = report["inventory_contract"]
+            bundle.tool_contract_drift = report["tool_contract_drift"]
             bundle.result = {
                 "passed": bool(probe.get("api", {}).get("available")) and state_observation.validation.get("valid") is not False,
                 "summary": "WebMCP browser compatibility report",
@@ -516,6 +575,8 @@ class CommandAPI:
                 "finding_counts": report["summary"]["finding_counts"],
                 "contract_version": bundle.contract_version,
                 "engine_version": bundle.engine_version,
+                "tool_contract_drift": bundle.tool_contract_drift,
+                "tool_inventory_fingerprint": bundle.compatibility.tool_inventory_fingerprint,
             }
             report_path = self._safe_output(bundle.run_id, "preflight-report.json")
             self._safe_write(report_path, json.dumps(report, indent=2, default=str))
@@ -545,7 +606,20 @@ class CommandAPI:
         bundle.compatibility = Compatibility(groups=bundle.requirements)
         bundle.actions = [dict(actor=actor, **action.model_dump(mode="json")) for actor, actions in scenario.actors.items() for action in actions]
         bundle.faults = [fault.model_dump(mode="json") for fault in scenario.faults]
-        bundle.tool_inventory = redacted(tool_inventory or [])
+        bundle.tool_inventory = redact_tool_inventory(tool_inventory or [])
+        if tool_inventory is not None:
+            bundle.inventory_contract = build_inventory_contract(
+                tool_inventory,
+                include_descriptions=self.config.tool_contract_include_descriptions,
+            )
+            bundle.compatibility.tool_inventory_fingerprint = bundle.inventory_contract["inventory_fingerprint"]
+            bundle.tool_contract_drift = no_contract_comparison(
+                inventory_fingerprint=bundle.compatibility.tool_inventory_fingerprint
+            )
+            bundle.tool_contract_expectations = validate_contract_expectations(
+                scenario.tool_contracts, tool_inventory,
+                include_descriptions=self.config.tool_contract_include_descriptions,
+            )
         bundle.result = {"passed": True, "summary": "scenario is valid", "source": str(path) if path else "in_memory", "contract_version": bundle.schema_version, "engine_version": bundle.compatibility.engine_version}
         return bundle
 
@@ -559,7 +633,13 @@ class CommandAPI:
         except Exception as error:
             raise CommandError(f"scenario compatibility.requires is invalid: {error}") from error
 
-    def _validate_scenario_semantics(self, scenario: Scenario, tool_inventory: list[dict[str, Any]] | None = None) -> None:
+    def _validate_scenario_semantics(
+        self,
+        scenario: Scenario,
+        tool_inventory: list[dict[str, Any]] | None = None,
+        *,
+        include_contract_descriptions: bool | None = None,
+    ) -> None:
         required = self._requirements(scenario)
         unsupported = {key: value for key, value in required.model_dump().items() if SUPPORTED_COMPATIBILITY_GROUPS.get(key) != value}
         if unsupported:
@@ -569,6 +649,12 @@ class CommandAPI:
                 validate_syntax(expression)
             except InvariantError as error:
                 raise CommandError(f"invalid invariant {expression!r}: {error}") from error
+        for name, expectation in scenario.tool_contracts.items():
+            for expression in expectation.result_invariants:
+                try:
+                    validate_syntax(expression)
+                except InvariantError as error:
+                    raise CommandError(f"invalid tool contract result invariant for {name!r}: {expression!r}: {error}") from error
         if tool_inventory is not None:
             known = {tool.get("name") for tool in tool_inventory}
             referenced = {action.invoke or action.retry for actions in scenario.actors.values() for action in actions if action.invoke or action.retry}
@@ -589,6 +675,16 @@ class CommandAPI:
                     raise CommandError(f"scenario state tool {scenario.state.tool!r} was not discovered")
                 if (state_tool.get("annotations") or {}).get("readOnlyHint") is not True:
                     raise CommandError(f"scenario state tool {scenario.state.tool!r} must be marked readOnlyHint: true")
+            expectation_report = validate_contract_expectations(
+                scenario.tool_contracts, tool_inventory,
+                include_descriptions=(
+                    self.config.tool_contract_include_descriptions
+                    if include_contract_descriptions is None
+                    else include_contract_descriptions
+                ),
+            )
+            if not expectation_report["passed"]:
+                raise ToolContractExpectationError(expectation_report)
 
     @staticmethod
     def _validate_execution_policy(scenario: Scenario, allow_mutations: bool) -> None:
@@ -674,7 +770,10 @@ class CommandAPI:
             raise CommandError(f"invalid run bundle {run_id}: {error}") from error
 
     def diff(self, left: Path, right: Path) -> dict[str, Any]:
-        return diff_bundles(RunBundle.model_validate_json(left.read_text()), RunBundle.model_validate_json(right.read_text()))
+        return diff_bundles(
+            RunBundle.model_validate_json(left.read_text()),
+            RunBundle.model_validate_json(right.read_text()),
+        )
 
     def report(self, bundle_path: Path, output: Path | None = None) -> dict[str, Any]:
         record = RunBundle.model_validate_json(bundle_path.read_text())
@@ -716,6 +815,9 @@ class CommandAPI:
                 "agent_policy": record.agent_policy,
             },
             "capability_fingerprint": record.compatibility.capability_fingerprint,
+            "tool_inventory_fingerprint": record.compatibility.tool_inventory_fingerprint,
+            "tool_contract_drift": record.tool_contract_drift,
+            "tool_contract_expectations": record.tool_contract_expectations,
             "artifacts": safe_artifacts,
             "replay_command": record.replay_command,
         })
@@ -731,6 +833,8 @@ class CommandAPI:
             f"- Scenario: {summary.get('scenario') or 'unknown'}",
             f"- Failed invariant: {summary.get('failed_invariant') or 'unknown'}",
             f"- Capability fingerprint: {summary.get('capability_fingerprint') or 'unknown'}",
+            f"- Tool inventory fingerprint: {summary.get('tool_inventory_fingerprint') or 'unknown'}",
+            f"- Tool contract drift: {(summary.get('tool_contract_drift') or {}).get('status', 'not_compared')} ({(summary.get('tool_contract_drift') or {}).get('policy_impact', 'none')})",
             f"- Bundle: {bundle_path}",
             f"- Replay: `{' '.join(summary.get('replay_command') or [])}`",
             "", "## Observed state", "", "```json",
@@ -747,11 +851,19 @@ class CommandAPI:
     async def run(self, scenario_path: Path | None = None, *, scenario: Scenario | dict[str, Any] | None = None, run_id: str | None = None, headless: bool = True,
                   allow_mutations: bool = False, adversarial: bool = False, seed: int = 0,
                   expected_capability_fingerprint: str | None = None,
+                  expected_tool_inventory_fingerprint: str | None = None,
+                  expected_tool_inventory: list[dict[str, Any]] | None = None,
+                  contract_include_descriptions: bool | None = None,
                   recorded_schedule: list[dict[str, Any]] | None = None,
                   allowed_target_origins: Iterable[str] | None = None) -> RunBundle:
         if (scenario_path is None) == (scenario is None):
             raise CommandError("provide exactly one scenario path or in-memory scenario")
         scenario = load_scenario(scenario_path) if scenario_path is not None else (scenario if isinstance(scenario, Scenario) else Scenario.model_validate(scenario))
+        include_contract_descriptions = (
+            self.config.tool_contract_include_descriptions
+            if contract_include_descriptions is None
+            else contract_include_descriptions
+        )
         self._validate_scenario_semantics(scenario)
         _validate_state_requirements(self.config, scenario)
         try:
@@ -837,14 +949,44 @@ class CommandAPI:
                 network: list[dict[str, Any]] = []
                 client.page.on("response", lambda response: network.append({"url": response.url, "status": response.status, "method": response.request.method}))
                 runner = ScenarioRunner(client.page, scenario, self.config.state_script, self.config.from_origins, allow_mutations, base_url=self.config.base_url)
+                # Discovery supplies the live compatibility contract. Validate
+                # and compare it before any scenario tool or UI action runs.
+                available_tools = await readiness.get_tools()
+                live_contract = build_inventory_contract(
+                    available_tools,
+                    include_descriptions=include_contract_descriptions,
+                )
+                bundle.tool_inventory = redact_tool_inventory(available_tools)
+                bundle.inventory_contract = live_contract
+                bundle.compatibility.tool_inventory_fingerprint = live_contract["inventory_fingerprint"]
+                if expected_tool_inventory_fingerprint:
+                    contract_drift = compare_tool_inventories(
+                        expected_tool_inventory or [],
+                        available_tools,
+                        include_descriptions=include_contract_descriptions,
+                    )
+                    bundle.tool_contract_drift = contract_drift
+                    if live_contract["inventory_fingerprint"] != expected_tool_inventory_fingerprint:
+                        raise ToolContractDriftError(contract_drift)
+                else:
+                    bundle.tool_contract_drift = no_contract_comparison(
+                        inventory_fingerprint=live_contract["inventory_fingerprint"]
+                    )
+                bundle.tool_contract_expectations = validate_contract_expectations(
+                    scenario.tool_contracts, available_tools,
+                    include_descriptions=include_contract_descriptions,
+                )
+                if not bundle.tool_contract_expectations["passed"]:
+                    raise ToolContractExpectationError(bundle.tool_contract_expectations)
+                self._validate_scenario_semantics(
+                    scenario,
+                    available_tools,
+                    include_contract_descriptions=include_contract_descriptions,
+                )
                 try:
-                    # Discovery is the only authoritative source for tool references when it is available.
-                    available_tools = await readiness.get_tools()
-                    self._validate_scenario_semantics(scenario, available_tools)
                     trace = await runner.run(actual_schedule)
                     bundle.trace = trace
                     self._record_scheduler_trace(bundle)
-                    bundle.tool_inventory = list(runner.tools.values())
                     bundle.state_changes = [event.model_dump(mode="json") for event in trace.events if event.type == "state.observed"]
                     shot = output_root / f"schedule-{index}.png"
                     await client.page.screenshot(path=str(shot), full_page=True)
@@ -855,7 +997,6 @@ class CommandAPI:
                     last_error = error
                     bundle.trace = runner.recorder.run
                     self._record_scheduler_trace(bundle)
-                    bundle.tool_inventory = list(runner.tools.values())
                     bundle.execution.update({"schedule": self.schedule_descriptor(scenario, actual_schedule), "schedule_index": index})
                     bundle.execution["scheduler"]["selected_logical_schedule"] = bundle.execution["schedule"]
                     failure = runner.write_failure(output_root / "failure.yaml", bundle.execution["schedule"], run_id=bundle.run_id, requirements=requirements.model_dump(mode="json"))
@@ -888,7 +1029,22 @@ class CommandAPI:
         if bundle.execution["schedule"] is None and chosen:
             bundle.execution.update({"schedule": self.schedule_descriptor(scenario, chosen[0] or [(action.offset_ms, actor, action) for actor, actions in scenario.actors.items() for action in actions]), "schedule_index": 0})
             bundle.execution["scheduler"]["selected_logical_schedule"] = bundle.execution["schedule"]
-        bundle.result = {"passed": last_error is None, "error": str(last_error) if last_error else None, "schedules": len(chosen), "seed": seed, "contract_version": bundle.schema_version, "engine_version": bundle.compatibility.engine_version}
+        assertion_events = [
+            event for event in (bundle.trace.events if bundle.trace else [])
+            if event.type.startswith("tool_contract.assertion.")
+        ]
+        if assertion_events:
+            bundle.tool_contract_expectations["semantic_assertions"] = {
+                "status": "failed" if any(event.type.endswith(".fail") for event in assertion_events) else "passed",
+                "checks": [redacted(event.data | {"tool": event.name, "passed": event.type.endswith(".pass")}) for event in assertion_events],
+            }
+            if any(event.type.endswith(".fail") for event in assertion_events):
+                bundle.tool_contract_expectations["status"] = "failed"
+                bundle.tool_contract_expectations["passed"] = False
+        bundle.result = {"passed": last_error is None, "error": str(last_error) if last_error else None, "schedules": len(chosen), "seed": seed, "contract_version": bundle.schema_version, "engine_version": bundle.compatibility.engine_version,
+                         "tool_inventory_fingerprint": bundle.compatibility.tool_inventory_fingerprint,
+                         "tool_contract_drift": bundle.tool_contract_drift,
+                         "tool_contract_expectations": bundle.tool_contract_expectations}
         bundle.replay_command = ["webmcp", "replay", str(output_root / "bundle.json"), "--run-id", bundle.run_id]
         if allow_mutations:
             bundle.replay_command.append("--allow-mutations")
@@ -938,12 +1094,19 @@ class CommandAPI:
                      allowed_target_origins: Iterable[str] | None = None) -> RunBundle:
         """Replay a contract bundle without any frontend-specific filesystem shim."""
         scenario, seed, saved = self.replay_bundle(path)
+        fingerprint_policy = saved.inventory_contract.get("fingerprint_policy", {})
+        include_contract_descriptions = bool(
+            fingerprint_policy.get("include_descriptions", False)
+        ) if isinstance(fingerprint_policy, dict) else False
         result = await self.run(None, scenario=scenario, run_id=run_id, headless=headless,
                                 allow_mutations=allow_mutations,
                                 adversarial=bool(saved.execution["adversarial"]), seed=seed,
                                 recorded_schedule=(saved.execution.get("scheduler", {}).get("selected_logical_schedule", saved.execution["schedule"])
                                                    if isinstance(saved.execution.get("scheduler"), dict) else saved.execution["schedule"]),
                                 expected_capability_fingerprint=saved.compatibility.capability_fingerprint,
+                                expected_tool_inventory_fingerprint=saved.compatibility.tool_inventory_fingerprint,
+                                expected_tool_inventory=saved.tool_inventory,
+                                contract_include_descriptions=include_contract_descriptions,
                                 allowed_target_origins=allowed_target_origins)
         result.command = "replay"
         return result
@@ -957,6 +1120,59 @@ def diff_bundles(left: RunBundle, right: RunBundle) -> dict[str, Any]:
                     "headless": left.compatibility.headless, "fingerprint": left.compatibility.capability_fingerprint}
     browser_right = {"browser": right.compatibility.browser, "version": right.compatibility.browser_version,
                      "headless": right.compatibility.headless, "fingerprint": right.compatibility.capability_fingerprint}
+    def recorded_fingerprint_policy(bundle: RunBundle) -> dict[str, bool]:
+        policy = bundle.inventory_contract.get("fingerprint_policy", {})
+        return {
+            "include_descriptions": (
+                policy.get("include_descriptions") is True
+                if isinstance(policy, dict)
+                else False
+            )
+        }
+
+    def recorded_inventory_fingerprint(bundle: RunBundle) -> str | None:
+        fingerprint = bundle.inventory_contract.get("inventory_fingerprint")
+        return (
+            fingerprint
+            if isinstance(fingerprint, str)
+            else bundle.compatibility.tool_inventory_fingerprint
+        )
+
+    left_policy = recorded_fingerprint_policy(left)
+    right_policy = recorded_fingerprint_policy(right)
+    if left_policy == right_policy:
+        tool_contract_drift = compare_tool_inventories(
+            left.tool_inventory,
+            right.tool_inventory,
+            include_descriptions=left_policy["include_descriptions"],
+        )
+        tool_contract_drift["fingerprint_policy"] = left_policy
+        tool_contract_drift["policy_mismatch"] = None
+    else:
+        # There is no single valid canonicalization for this pair. Report the
+        # saved evidence verbatim instead of creating fingerprints under one
+        # side's policy that would contradict the other bundle.
+        tool_contract_drift = {
+            "version": "1.0",
+            "status": "policy_mismatch",
+            "changed": True,
+            "policy_impact": "unknown",
+            "fingerprint_policy": None,
+            "policy_mismatch": {
+                "baseline": left_policy,
+                "current": right_policy,
+            },
+            "baseline_inventory_fingerprint": recorded_inventory_fingerprint(left),
+            "current_inventory_fingerprint": recorded_inventory_fingerprint(right),
+            "added_tools": [],
+            "removed_tools": [],
+            "changed_input_schemas": [],
+            "changed_output_schemas": [],
+            "changed_annotations": [],
+            "descriptive_only_changes": [],
+            "unchanged_tools": [],
+            "details": {},
+        }
     def result_codes(bundle: RunBundle) -> list[str]:
         return [
             str((event.data.get("result") or {}).get("code"))
@@ -968,7 +1184,7 @@ def diff_bundles(left: RunBundle, right: RunBundle) -> dict[str, Any]:
         failures = [
             {"type": event.type, "expression": event.data.get("expression"), "state": redacted(event.state_snapshot)}
             for event in (bundle.trace.events if bundle.trace else [])
-            if event.type in {"invariant.fail", "result_invariant.fail"}
+            if event.type in {"invariant.fail", "result_invariant.fail", "tool_contract.assertion.fail"}
         ]
         return {"passed": bundle.result.get("passed"), "failures": failures}
 
@@ -995,11 +1211,13 @@ def diff_bundles(left: RunBundle, right: RunBundle) -> dict[str, Any]:
         "requirements": left.requirements.model_dump(mode="json"),
         "browser": browser_left,
         "approval_policy": left.execution.get("approval_policy", [item.model_dump(mode="json") for item in left.approvals]),
+        "tool_inventory_fingerprint": left.compatibility.tool_inventory_fingerprint,
     }
     compatibility_right = {
         "requirements": right.requirements.model_dump(mode="json"),
         "browser": browser_right,
         "approval_policy": right.execution.get("approval_policy", [item.model_dump(mode="json") for item in right.approvals]),
+        "tool_inventory_fingerprint": right.compatibility.tool_inventory_fingerprint,
     }
     behaviour_left = {
         "invariant_outcome": invariant_outcome(left),
@@ -1021,6 +1239,8 @@ def diff_bundles(left: RunBundle, right: RunBundle) -> dict[str, Any]:
         key: {"left": compatibility_left[key], "right": compatibility_right[key]}
         for key in compatibility_left if compatibility_left[key] != compatibility_right[key]
     }
+    if tool_contract_drift["changed"]:
+        compatibility_changes["tool_contracts"] = tool_contract_drift
     behavioural_changes = {
         key: {"left": behaviour_left[key], "right": behaviour_right[key]}
         for key in behaviour_left if behaviour_left[key] != behaviour_right[key]
@@ -1031,6 +1251,7 @@ def diff_bundles(left: RunBundle, right: RunBundle) -> dict[str, Any]:
             "events_only_left": [item for item in left_events if item not in right_events],
             "events_only_right": [item for item in right_events if item not in left_events],
             "compatibility_drift": {"changed": bool(compatibility_changes), "changes": compatibility_changes},
+            "tool_contract_drift": tool_contract_drift,
             "behavioural_drift": {"changed": bool(behavioural_changes), "changes": behavioural_changes},
             "semantic": {"left": {"compatibility": compatibility_left, "behaviour": behaviour_left}, "right": {"compatibility": compatibility_right, "behaviour": behaviour_right}},
             }

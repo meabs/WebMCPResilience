@@ -113,6 +113,10 @@ def test_command_preflight_never_invokes_a_page_tool(tmp_path: Path, monkeypatch
     assert bundle.preflight["non_mutating"] is True
     assert bundle.browser_environment["version"] == "123.0"
     assert bundle.browser_environment["channel"] == "default"
+    assert bundle.compatibility.tool_inventory_fingerprint
+    assert bundle.inventory_contract["tools"][0]["fingerprint"]
+    assert bundle.tool_contract_drift["status"] == "unchanged"
+    assert bundle.result["tool_contract_drift"]["status"] == "unchanged"
     report_artifact = next(artifact for artifact in bundle.artifacts if artifact.kind == "report")
     report = json.loads(Path(report_artifact.path).read_text())
     assert report["report_kind"] == "webmcp_compatibility"

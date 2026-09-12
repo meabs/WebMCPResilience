@@ -68,10 +68,19 @@ bundle    .webmcp/runs/race-failure/bundle.json
 replay    webmcp replay .webmcp/runs/race-failure/bundle.json --json
 ```
 
-That matters in CI. A saved bundle captures the scenario, browser and tool
-inventory, selected schedule, observable state, trace, approvals, artifacts,
-result, and replay command. `webmcp replay` refuses an incompatible browser or
-capability fingerprint instead of silently reinterpreting old evidence.
+That matters in CI. A saved bundle captures the scenario, browser and canonical
+redacted tool inventory, per-tool and complete inventory fingerprints, selected
+schedule, observable state, trace, approvals, artifacts, result, and replay
+command. `webmcp replay` refuses an incompatible browser capability or live
+tool-contract fingerprint instead of silently reinterpreting old evidence.
+
+Baseline comparison classifies added and removed tools, input/output schema
+changes, annotation changes, and unchanged tools separately from behavioural
+drift. A scenario can optionally pin required inputs, read-only intent, a
+declared semantic version, allowed result codes, and deterministic result-count
+invariants. This is deliberately bounded: it detects declared structural and
+observable contract drift; it does not automatically prove unchanged business
+meaning.
 
 The tool remains CLI-first:
 
@@ -203,7 +212,8 @@ seed, and event timestamps are preserved as evidence.
 ### Portable, safe evidence
 
 Every command emits `.webmcp/runs/<run-id>/bundle.json`. The versioned bundle
-contains the scenario, compatibility requirements, capability fingerprint,
+contains the scenario, compatibility requirements, browser capability and tool
+inventory fingerprints, canonical redacted contract summary, drift status,
 schedule, approval policy, trace, result, and artifact metadata. Recursive
 redaction handles sensitive structured fields and URL query credentials,
 including common signature and API-key forms. Console and agent reads redact
@@ -211,9 +221,12 @@ again at the display boundary, so imported bundles are not trusted merely
 because they claim to be redacted. Potentially sensitive screenshots are never
 returned through the agent interface and are metadata-only in the console.
 
-Replay validates compatibility before launch and reuses the recorded
-adversarial schedule. The result is a reviewable evidence handoff, not an
-opaque test artifact.
+Replay validates browser compatibility and live tool inventory before any
+scenario action, then reuses the recorded adversarial schedule. A mismatch
+returns structured `tool_contract_drift` evidence with safe tool names and
+policy impact. The result is a reviewable evidence handoff, not an opaque test
+artifact. Structural and observable checks do not claim automatic business
+semantic equivalence.
 
 ### Agent control without abandoning CLI
 

@@ -23,6 +23,7 @@ WebMCP Resilience makes those interactions testable without inventing data or pr
 - Bounded, seeded schedules explore declared simultaneous actions.
 - Declared latency, timeout, duplicate, cancellation, navigation, and HTTP faults exercise hostile timing.
 - Observable-state and result invariants expose the application failure.
+- Canonical tool-contract fingerprints detect structural drift before replay.
 - Fresh-session reduction produces the smallest declared-action reproduction that still fails.
 - A versioned, redacted bundle makes the failure reviewable and replayable.
 
@@ -90,7 +91,7 @@ state_script: window.__app.getObservableState()
 .venv/bin/webmcp diff left/bundle.json right/bundle.json --json
 ```
 
-Every command writes a portable bundle under `.webmcp/runs/<run-id>/bundle.json`. A bundle contains the scenario, compatibility requirements and fingerprint, preflight evidence, selected schedule, trace, state observations, approvals, artifact metadata, result, and replay command. Replay rejects an incompatible browser capability fingerprint rather than reinterpreting historical evidence.
+Every command writes a portable bundle under `.webmcp/runs/<run-id>/bundle.json`. A bundle contains the scenario, compatibility requirements, browser capability fingerprint, canonical redacted tool-contract inventory and fingerprints, drift status, preflight evidence, selected schedule, trace, state observations, approvals, artifact metadata, result, and replay command. Replay preserves the browser capability check and also rejects a changed live tool-inventory fingerprint with a structured `tool_contract_drift` error.
 
 ## Scenarios are portable contracts
 
@@ -129,6 +130,28 @@ actors:
 ```
 
 `scenario.state.tool` supplies declared values to action arguments. It does not replace the configured `state_script` used for state-invariant evaluation.
+
+Tool-contract expectations are optional. Use them only where a scenario needs
+to pin structural or observable assumptions:
+
+```yaml
+tool_contracts:
+  reserve_inventory:
+    # fingerprint is optional; ordinary scenarios do not need one.
+    fingerprint: "<optional canonical per-tool fingerprint>"
+    required_inputs: [sku, quantity]
+    read_only: false
+    semantic_version: "1"
+    result_invariants:
+      - results.reserve_inventory.OK == 1
+    expected_result_codes: [OK, STALE_STATE]
+```
+
+Discovery validates the pinned fingerprint, required inputs, `readOnlyHint`,
+and declared semantic version before execution. Result assertions operate only
+on returned codes and the deterministic `results.<tool>.<code>` counts. The
+framework detects declared structural and observable contract drift; it does
+not automatically prove that business meaning is unchanged.
 
 ## CLI first. Console and agents included.
 
@@ -185,7 +208,7 @@ This is defence in depth for unsafe agent-originated test requests. It is not a 
 
 ## What preflight checks
 
-`preflight` is browser-native readiness evidence, not official MCP conformance. It reports WebMCP availability, browser/channel, native or compatibility-host mode, secure-context and origin-isolation information, Permissions Policy, iframe topology, tool schemas and annotations, inventory changes, state observation configuration, and non-executing cancellation/navigation evidence.
+`preflight` is browser-native readiness evidence, not official MCP conformance. It reports WebMCP availability, browser/channel, native or compatibility-host mode, secure-context and origin-isolation information, Permissions Policy, iframe topology, tool schemas and annotations, per-tool and complete inventory fingerprints, drift status, state observation configuration, and non-executing cancellation/navigation evidence. Tool fingerprints use name, input schema, output schema, and annotations with recursively sorted keys; descriptions and volatile runtime fields are excluded unless `tool_contract_include_descriptions: true` is explicitly configured.
 
 Chrome describes WebMCP as a proposed, evolving standard. Keep the browser adapter narrow, run preflight in CI, and treat the bundle as evidence of the runtime you actually tested.
 
