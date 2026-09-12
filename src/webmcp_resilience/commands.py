@@ -1,0 +1,867 @@
+"""Typed command interface shared by CLI, console and Python callers."""
+from __future__ import annotations
+
+import hashlib
+import html
+import json
+import platform
+from collections import Counter
+from contextlib import suppress
+from pathlib import Path
+from typing import Any, Iterable
+
+import yaml
+
+from .browser import BrowserClient, WebMCPAdapter
+from .config import Config
+from .models.bundle import (ApprovalRecord, Artifact, Compatibility, RunBundle,
+                            CompatibilityRequirements, SUPPORTED_COMPATIBILITY_GROUPS, redact_recursive,
+                            StateObservation, validate_identifier)
+from .models.scenario import Scenario
+from .engine import ScenarioRunner, reduce_failure, schedules
+from .engine.explorer import ScheduledAction
+from .engine.invariants import InvariantError, validate_syntax
+from .security import agent_policy_snapshot, canonical_origin, resolve_navigation_url, validate_scenario_navigation
+
+
+WEBMCP_COMPATIBILITY_REPORT_VERSION = "1.0"
+
+
+def _finding(identifier: str, severity: str, recommendation: str, source: str, value: Any, *, title: str | None = None) -> dict[str, Any]:
+    return {
+        "id": identifier,
+        "severity": severity,
+        "title": title or identifier.replace("-", " ").capitalize(),
+        "recommendation": recommendation,
+        "source_evidence": {"path": source, "value": redacted(value)},
+    }
+
+
+def _inventory_entry(tool: dict[str, Any], index: int) -> dict[str, Any]:
+    schema = tool.get("inputSchema")
+    schema_valid = (
+        isinstance(schema, dict)
+        and schema.get("type", "object") == "object"
+        and isinstance(schema.get("properties", {}), dict)
+        and isinstance(schema.get("required", []), list)
+        and all(isinstance(item, str) for item in schema.get("required", []))
+    )
+    annotations = tool.get("annotations")
+    annotation_quality = "valid_object" if isinstance(annotations, dict) else "missing"
+    return {
+        "index": index,
+        "name": tool.get("name"),
+        "description": tool.get("description"),
+        "schema_quality": "valid_object" if schema_valid else "missing_or_invalid",
+        "schema_evidence": {
+            "type": schema.get("type") if isinstance(schema, dict) else None,
+            "property_count": len(schema.get("properties", {})) if isinstance(schema, dict) and isinstance(schema.get("properties", {}), dict) else 0,
+            "required_count": len(schema.get("required", [])) if isinstance(schema, dict) and isinstance(schema.get("required", []), list) else 0,
+        },
+        "annotation_quality": annotation_quality,
+        "annotations": annotations if isinstance(annotations, dict) else {},
+        "mutation_signal": (
+            "read_only" if isinstance(annotations, dict) and annotations.get("readOnlyHint") is True
+            else "consequential" if isinstance(annotations, dict) and annotations.get("destructiveHint") is True
+            else "unknown"
+        ),
+    }
+
+
+def build_state_observation(
+    config: Config,
+    scenario: Scenario | None = None,
+    *,
+    script_validation: dict[str, Any] | None = None,
+    tool_inventory: list[dict[str, Any]] | None = None,
+) -> StateObservation:
+    """Describe only declared state sources; never derive state from the UI."""
+    script = config.state_script
+    state_tool = scenario.state.tool if scenario and scenario.state else None
+    script_result = script_validation or {
+        "status": "configured_not_checked" if script else "not_configured",
+        "valid": None,
+        "message": "State script will be evaluated before scenario actions." if script else "No state_script is configured.",
+    }
+    if script:
+        mode = "state_script"
+        source = script
+        primary = script_result
+    elif state_tool:
+        mode = "scenario_state_tool"
+        source = f"scenario.state.tool: {state_tool}"
+        descriptor = next((item for item in (tool_inventory or []) if item.get("name") == state_tool), None)
+        if tool_inventory is None:
+            tool_result = {"status": "discovery_pending", "valid": None, "message": "The scenario state tool must be discovered before execution."}
+        elif descriptor is None:
+            tool_result = {"status": "invalid", "valid": False, "message": f"Scenario state tool {state_tool!r} was not discovered."}
+        elif (descriptor.get("annotations") or {}).get("readOnlyHint") is not True:
+            tool_result = {"status": "invalid", "valid": False, "message": f"Scenario state tool {state_tool!r} must be marked readOnlyHint: true."}
+        else:
+            tool_result = {"status": "valid", "valid": True, "message": "Discovered state tool is explicitly read-only."}
+        primary = tool_result
+    else:
+        mode = "none"
+        source = None
+        primary = {"status": "not_configured", "valid": None, "message": "No state observation source is configured."}
+    return StateObservation(
+        mode=mode,
+        configured_source=source,
+        validation=primary,
+        state_script={"configured": bool(script), "source": script, "validation": script_result},
+        scenario_state_tool={
+            "configured": bool(state_tool),
+            "tool": state_tool,
+            "validation": (
+                primary if mode == "scenario_state_tool" else
+                {"status": "not_configured", "valid": None, "message": "No scenario.state.tool is configured."}
+            ),
+        },
+    )
+
+
+def _validate_state_requirements(config: Config, scenario: Scenario) -> None:
+    expressions_to_check = [*scenario.invariants, *scenario.result_invariants]
+    if expressions_to_check and not config.state_script:
+        expressions = ", ".join(repr(expression) for expression in expressions_to_check)
+        raise CommandError(
+            f"invariant state is unavailable for {expressions}; configure state_script to a JavaScript expression "
+            "that returns the application's observable state. scenario.state.tool only supplies action arguments."
+        )
+
+
+def build_webmcp_compatibility_report(
+    probe: dict[str, Any],
+    inventory: list[dict[str, Any]],
+    *,
+    browser: dict[str, Any],
+    inventory_before: list[dict[str, Any]] | None = None,
+    inventory_error: str | None = None,
+    state_observation: StateObservation | None = None,
+) -> dict[str, Any]:
+    """Build the browser-native, non-mutating WebMCP compatibility report."""
+    api = probe.get("api", {})
+    document = probe.get("document", {})
+    permissions = probe.get("permissionsPolicy", {})
+    runtime = probe.get("runtime", {})
+    lifecycle = probe.get("lifecycle", {})
+    tools = [_inventory_entry(tool, index) for index, tool in enumerate(inventory)]
+    before_names = [tool.get("name") for tool in (inventory_before or inventory) if isinstance(tool, dict)]
+    after_names = [tool.get("name") for tool in inventory if isinstance(tool, dict)]
+    added = sorted(set(after_names) - set(before_names))
+    removed = sorted(set(before_names) - set(after_names))
+    findings: list[dict[str, Any]] = []
+
+    if not api.get("available"):
+        findings.append(_finding(
+            "webmcp-api-unavailable", "error",
+            "Use a browser build and target page that expose the WebMCP model context API.",
+            "webmcp.api.available", api.get("available"), title="WebMCP API is unavailable",
+        ))
+    elif api.get("getTools") is not True:
+        findings.append(_finding(
+            "tool-discovery-unavailable", "error",
+            "Expose the WebMCP getTools discovery method so the target's tool contract can be inspected.",
+            "webmcp.api.getTools", api.get("getTools"), title="WebMCP tool discovery is unavailable",
+        ))
+    elif api.get("executeTool") is not True:
+        findings.append(_finding(
+            "tool-execution-unavailable", "error",
+            "Expose the WebMCP executeTool method; preflight will still remain non-mutating.",
+            "webmcp.api.executeTool", api.get("executeTool"), title="WebMCP tool execution is unavailable",
+        ))
+    elif api.get("mode") == "compatibility_host":
+        findings.append(_finding(
+            "compatibility-host-mode", "warning",
+            "Use a browser with native WebMCP support for production compatibility confidence; keep the host for local fallback testing.",
+            "webmcp.api.mode", api.get("mode"), title="Compatibility host is active",
+        ))
+
+    if document.get("secureContext") is False:
+        findings.append(_finding(
+            "insecure-context", "error",
+            "Serve the target over HTTPS or a browser-trusted local secure context.",
+            "document.secureContext", document.get("secureContext"), title="Target is not in a secure context",
+        ))
+    if document.get("crossOriginIsolated") is not True:
+        findings.append(_finding(
+            "origin-not-isolated", "info",
+            "Enable cross-origin isolation when the target requires SharedArrayBuffer or other isolated browser capabilities.",
+            "document.crossOriginIsolated", document.get("crossOriginIsolated"), title="Origin is not cross-origin isolated",
+        ))
+    if permissions.get("available") is False:
+        findings.append(_finding(
+            "permissions-policy-unavailable", "warning",
+            "Expose and verify the Permissions Policy used to delegate model context to the target document.",
+            "permissionsPolicy.available", permissions.get("available"), title="Permissions Policy evidence is unavailable",
+        ))
+    elif permissions.get("modelContextAllowed") is False:
+        findings.append(_finding(
+            "permissions-policy-denied", "error",
+            "Allow model-context for this origin in the response Permissions-Policy and iframe allow attributes.",
+            "permissionsPolicy.modelContextAllowed", permissions.get("modelContextAllowed"), title="Permissions Policy denies model context",
+        ))
+    elif permissions.get("modelContextAllowed") is None:
+        findings.append(_finding(
+            "permissions-policy-unverified", "warning",
+            "Verify model-context delegation explicitly; this browser did not expose a definitive permission result.",
+            "permissionsPolicy.modelContextAllowed", permissions.get("modelContextAllowed"), title="Model context permission is unverified",
+        ))
+
+    frames = document.get("frames", []) if isinstance(document.get("frames"), list) else []
+    if frames:
+        findings.append(_finding(
+            "iframe-topology", "warning",
+            "Verify each embedded document's origin, sandbox, and allow attributes before relying on WebMCP from an iframe.",
+            "document.frames", frames, title="Document contains iframes",
+        ))
+    cross_origin_frames = [frame for frame in frames if isinstance(frame, dict) and frame.get("sameOrigin") is False]
+    if cross_origin_frames:
+        findings.append(_finding(
+            "cross-origin-iframe", "warning",
+            "Configure explicit Permissions Policy delegation and test the iframe's own model context; parent-page evidence does not prove iframe access.",
+            "document.frames[sameOrigin=false]", cross_origin_frames, title="Cross-origin iframe detected",
+        ))
+
+    if api.get("cancellation") is not True:
+        findings.append(_finding(
+            "cancellation-unavailable", "warning",
+            "Provide AbortController support and ensure executeTool propagates AbortSignal cancellation.",
+            "webmcp.api.cancellation", api.get("cancellation"), title="Cancellation capability is unavailable",
+        ))
+    else:
+        findings.append(_finding(
+            "cancellation-not-exercised", "info",
+            "Run a declared cancellation scenario to verify tool-level cancellation; preflight intentionally never invokes a page tool.",
+            "webmcp.api.cancellation", {"host_signal": True, "tested": False}, title="Cancellation is host-capable but untested",
+        ))
+    if runtime.get("navigation") is not True:
+        findings.append(_finding(
+            "navigation-unavailable", "warning",
+            "Expose standard document navigation APIs and test navigation-related scenarios separately.",
+            "runtime.navigation", runtime.get("navigation"), title="Navigation capability is unavailable",
+        ))
+
+    for item in tools:
+        if item["schema_quality"] != "valid_object":
+            findings.append(_finding(
+                "tool-schema-quality", "warning",
+                "Publish a JSON object inputSchema with valid properties and required entries.",
+                f"tool_inventory[{item['index']}].inputSchema", item["schema_quality"], title=f"Tool schema needs review: {item.get('name')}",
+            ))
+        if item["annotation_quality"] != "valid_object":
+            findings.append(_finding(
+                "tool-annotations-missing", "warning",
+                "Publish tool annotations, especially readOnlyHint or destructiveHint, so callers can apply safe execution policy.",
+                f"tool_inventory[{item['index']}].annotations", item["annotation_quality"], title=f"Tool annotations missing: {item.get('name')}",
+            ))
+    if inventory_error:
+        findings.append(_finding(
+            "tool-inventory-error", "error", "Fix the WebMCP getTools implementation so the browser can expose a stable inventory.",
+            "tool_inventory.error", inventory_error, title="Tool inventory could not be collected",
+        ))
+    if state_observation and state_observation.validation.get("valid") is False:
+        findings.append(_finding(
+            "state-observation-invalid", "error",
+            state_observation.validation.get("message", "Fix the configured state observation source before running invariants."),
+            "state_observation.validation", state_observation.validation,
+            title="State observation is invalid",
+        ))
+    if added or removed:
+        findings.append(_finding(
+            "tool-inventory-changed", "warning", "Investigate dynamic tool registration and rerun preflight before relying on the inventory.",
+            "tool_inventory.changes", {"added": added, "removed": removed}, title="Tool inventory changed during preflight",
+        ))
+
+    counts = Counter(item["severity"] for item in findings)
+    status = "unsupported" if counts["error"] else "degraded" if counts["warning"] else "compatible"
+    report = {
+        "report_version": WEBMCP_COMPATIBILITY_REPORT_VERSION,
+        "report_kind": "webmcp_compatibility",
+        "scope": "browser_webmcp_compatibility",
+        "non_mutating": True,
+        "browser": browser,
+        "webmcp": {
+            "api": api,
+            "native_mode": api.get("mode"),
+            "toolchange_listener_supported": lifecycle.get("toolchangeListenerSupported"),
+        },
+        "security": {
+            "secure_context": document.get("secureContext"),
+            "origin": document.get("origin"),
+            "top_origin": document.get("topOrigin"),
+            "cross_origin_isolated": document.get("crossOriginIsolated"),
+            "permissions_policy": permissions,
+        },
+        "document_topology": {
+            "is_top_level": document.get("isTopLevel"),
+            "same_origin_with_top": document.get("sameOriginWithTop"),
+            "iframe_count": document.get("iframeCount", len(frames)),
+            "frames": frames,
+        },
+        "runtime": {
+            "user_agent": runtime.get("userAgent"),
+            "headless": runtime.get("headless"),
+            "cancellation": {"host_signal_supported": api.get("cancellation"), "tested": False},
+            "navigation": {"browser_navigation_api": runtime.get("navigation"), "tested": False},
+        },
+        "state_observation": state_observation.model_dump(mode="json") if state_observation else build_state_observation(Config()).model_dump(mode="json"),
+        "tool_inventory": tools,
+        "inventory_changes": {"observed": bool(added or removed), "added": added, "removed": removed},
+        "findings": findings,
+        "summary": {
+            "status": status,
+            "finding_counts": dict(sorted(counts.items())),
+            "tool_count": len(tools),
+        },
+    }
+    return redacted(report)
+
+
+class CommandError(RuntimeError):
+    """Expected command failure; frontends map it to a stable exit code."""
+
+    exit_code = 2
+    code = "invalid_request"
+
+
+class PolicyDeniedError(CommandError):
+    """A request rejected before browser execution by the active policy."""
+
+    code = "policy_denied"
+
+
+def load_scenario(path: Path) -> Scenario:
+    try:
+        return Scenario.model_validate(yaml.safe_load(path.read_text()))
+    except Exception as error:
+        raise CommandError(f"invalid scenario {path}: {error}") from error
+
+
+def redacted(value: Any) -> Any:
+    return redact_recursive(value)
+
+
+def failure_handoff(bundle: RunBundle, bundle_path: Path | None = None) -> dict[str, Any]:
+    """Return the compact, portable handoff shared by CLI and control clients."""
+    failed = next(
+        (event for event in reversed(bundle.trace.events if bundle.trace else [])
+         if event.type in {"invariant.fail", "result_invariant.fail"}),
+        None,
+    )
+    reduced = next((artifact.path for artifact in bundle.artifacts if artifact.kind == "scenario"), None)
+    return {
+        "failed_invariant": (failed.data.get("expression") if failed else None),
+        "observed_state": redacted(failed.state_snapshot if failed else {}),
+        "capability_fingerprint": bundle.compatibility.capability_fingerprint,
+        "bundle_path": str(bundle_path) if bundle_path else None,
+        "reduced_repro_path": reduced,
+        "replay_command": list(bundle.replay_command),
+    }
+
+
+class CommandAPI:
+    """Deep command module: each operation returns one portable RunBundle."""
+
+    def __init__(self, config: Config, *, output_dir: Path = Path(".webmcp/runs")) -> None:
+        self.config, self.output_dir = config, output_dir.resolve()
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+    def _safe_output(self, *parts: str) -> Path:
+        """Resolve a framework-generated artifact and prove it stays contained."""
+        target = self.output_dir.joinpath(*parts).resolve()
+        try:
+            target.relative_to(self.output_dir)
+        except ValueError as error:
+            raise CommandError("unsafe output path rejected: traversal outside output root") from error
+        return target
+
+    @staticmethod
+    def _safe_write(target: Path, contents: str) -> Path:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(contents)
+        return target
+
+    async def preflight(self, path: str = "/", *, headless: bool = True, run_id: str | None = None) -> RunBundle:
+        bundle = RunBundle(command="preflight", **({"run_id": run_id} if run_id else {}))
+        bundle.agent_policy = agent_policy_snapshot(
+            [canonical_origin(self.config.base_url)],
+            mutation_permission=False,
+            authority_source="preflight",
+        )
+        try:
+            preflight_url = resolve_navigation_url(path, self.config.base_url)
+        except ValueError as error:
+            raise CommandError(f"preflight navigation rejected before browser execution: {error}") from error
+        async with BrowserClient(self.config.browser, headless=headless, args=self.config.browser_args, channel=self.config.browser_channel) as client:
+            assert client.page and client.browser
+            await client.page.goto(preflight_url)
+            adapter = WebMCPAdapter(client.page, self.config.state_script, self.config.from_origins)
+            await adapter.install()
+            probe = await adapter.probe()
+            inventory_before: list[dict[str, Any]] = []
+            inventory: list[dict[str, Any]] = []
+            inventory_error: str | None = None
+            if probe.get("api", {}).get("available") and probe.get("api", {}).get("getTools"):
+                try:
+                    # Discovery is read-only. It never executes a page tool.
+                    inventory_before = await adapter.get_tools()
+                    inventory = await adapter.get_tools()
+                except Exception as error:
+                    inventory_error = str(error)
+                    inventory = inventory_before
+            script_validation: dict[str, Any] | None = None
+            if self.config.state_script:
+                try:
+                    state = await adapter.get_state()
+                    script_validation = {
+                        "status": "valid",
+                        "valid": True,
+                        "returns_object": True,
+                        "message": "state_script returned an observable state object.",
+                        "keys": sorted(state),
+                    }
+                except Exception as error:
+                    script_validation = {
+                        "status": "invalid",
+                        "valid": False,
+                        "returns_object": False,
+                        "message": f"state_script must return an object: {error}",
+                    }
+            state_observation = build_state_observation(self.config, script_validation=script_validation)
+            browser_version = getattr(client.browser, "version", None)
+            if callable(browser_version):
+                browser_version = browser_version()
+            environment = {
+                "browser": self.config.browser,
+                "version": str(browser_version or "unknown"),
+                "channel": self.config.browser_channel or "default",
+                "headless": headless,
+                "platform": platform.platform(),
+                "url": client.page.url,
+                "user_agent": probe.get("runtime", {}).get("userAgent"),
+            }
+            probe["tools"] = {
+                "count": len(inventory),
+                "declarative": sum(isinstance(tool.get("inputSchema"), dict) for tool in inventory),
+                "schema_valid": sum(_inventory_entry(tool, index)["schema_quality"] == "valid_object" for index, tool in enumerate(inventory)),
+                "annotations_present": sum(isinstance(tool.get("annotations"), dict) for tool in inventory),
+                "inventory_error": inventory_error,
+            }
+            browser_evidence = {
+                "name": self.config.browser,
+                "version": environment["version"],
+                "channel": environment["channel"],
+                "headless": headless,
+                "user_agent": environment["user_agent"],
+            }
+            report = build_webmcp_compatibility_report(
+                probe,
+                inventory,
+                browser=browser_evidence,
+                inventory_before=inventory_before,
+                inventory_error=inventory_error,
+                state_observation=state_observation,
+            )
+            fingerprint = hashlib.sha256(json.dumps(redacted(report), sort_keys=True).encode()).hexdigest()[:16]
+            bundle.compatibility = Compatibility(
+                browser=self.config.browser,
+                browser_version=environment["version"],
+                headless=headless,
+                capability_fingerprint=fingerprint,
+            )
+            bundle.preflight = report
+            bundle.state_observation = state_observation
+            bundle.browser_environment = redacted(environment)
+            bundle.tool_inventory = redacted(inventory)
+            bundle.result = {
+                "passed": bool(probe.get("api", {}).get("available")) and state_observation.validation.get("valid") is not False,
+                "summary": "WebMCP browser compatibility report",
+                "report_kind": report["report_kind"],
+                "report_version": report["report_version"],
+                "status": report["summary"]["status"],
+                "finding_counts": report["summary"]["finding_counts"],
+                "contract_version": bundle.contract_version,
+                "engine_version": bundle.engine_version,
+            }
+            report_path = self._safe_output(bundle.run_id, "preflight-report.json")
+            self._safe_write(report_path, json.dumps(report, indent=2, default=str))
+            bundle.artifacts.append(Artifact(
+                kind="report", path=str(report_path), redacted=True, sensitivity="redacted",
+                description="browser-native WebMCP compatibility report",
+                run_id=bundle.run_id,
+            ))
+        return bundle
+
+    def validate(self, path: Path | None = None, *, scenario: Scenario | dict[str, Any] | None = None,
+                 run_id: str | None = None) -> RunBundle:
+        if (path is None) == (scenario is None):
+            raise CommandError("provide exactly one scenario path or in-memory scenario")
+        scenario = load_scenario(path) if path is not None else (scenario if isinstance(scenario, Scenario) else Scenario.model_validate(scenario))
+        self._validate_scenario_semantics(scenario)
+        _validate_state_requirements(self.config, scenario)
+        bundle = RunBundle.for_scenario("validate", scenario, run_id=run_id)
+        bundle.state_observation = build_state_observation(self.config, scenario)
+        bundle.agent_policy = agent_policy_snapshot(
+            [canonical_origin(self.config.base_url)],
+            mutation_permission=False,
+            authority_source="validate",
+        )
+        bundle.requirements = self._requirements(scenario)
+        bundle.compatibility = Compatibility(groups=bundle.requirements)
+        bundle.actions = [dict(actor=actor, **action.model_dump(mode="json")) for actor, actions in scenario.actors.items() for action in actions]
+        bundle.faults = [fault.model_dump(mode="json") for fault in scenario.faults]
+        bundle.result = {"passed": True, "summary": "scenario is valid", "source": str(path) if path else "in_memory", "contract_version": bundle.schema_version, "engine_version": bundle.compatibility.engine_version}
+        return bundle
+
+    @staticmethod
+    def _requirements(scenario: Scenario) -> CompatibilityRequirements:
+        declared = scenario.compatibility.get("requires")
+        if not isinstance(declared, dict) or set(declared) != set(SUPPORTED_COMPATIBILITY_GROUPS):
+            raise CommandError("scenario compatibility.requires must declare every typed versioned group")
+        try:
+            return CompatibilityRequirements.model_validate(declared)
+        except Exception as error:
+            raise CommandError(f"scenario compatibility.requires is invalid: {error}") from error
+
+    def _validate_scenario_semantics(self, scenario: Scenario, tool_inventory: list[dict[str, Any]] | None = None) -> None:
+        required = self._requirements(scenario)
+        unsupported = {key: value for key, value in required.model_dump().items() if SUPPORTED_COMPATIBILITY_GROUPS.get(key) != value}
+        if unsupported:
+            raise CommandError(f"scenario requires unsupported compatibility groups: {unsupported}")
+        for expression in [*scenario.invariants, *scenario.result_invariants]:
+            try:
+                validate_syntax(expression)
+            except InvariantError as error:
+                raise CommandError(f"invalid invariant {expression!r}: {error}") from error
+        if tool_inventory is not None:
+            known = {tool.get("name") for tool in tool_inventory}
+            referenced = {action.invoke or action.retry for actions in scenario.actors.values() for action in actions if action.invoke or action.retry}
+            if scenario.state:
+                referenced.add(scenario.state.tool)
+            missing = referenced - known
+            if missing:
+                raise CommandError(f"scenario references unavailable tools: {sorted(missing)}")
+            if scenario.state:
+                state_tool = next((tool for tool in tool_inventory if tool.get("name") == scenario.state.tool), None)
+                if state_tool is None:
+                    raise CommandError(f"scenario state tool {scenario.state.tool!r} was not discovered")
+                if (state_tool.get("annotations") or {}).get("readOnlyHint") is not True:
+                    raise CommandError(f"scenario state tool {scenario.state.tool!r} must be marked readOnlyHint: true")
+
+    @staticmethod
+    def _validate_execution_policy(scenario: Scenario, allow_mutations: bool) -> None:
+        if allow_mutations:
+            return
+        denied = [
+            (actor, action.action or "cancel")
+            for actor, actions in scenario.actors.items()
+            for action in actions
+            if action.action in {"click", "fill", "select"} or action.cancel is not None
+        ]
+        if denied:
+            details = ", ".join(f"{actor}:{action}" for actor, action in denied)
+            raise PolicyDeniedError(
+                f"read-only agent policy denied state-changing UI/cancellation actions: {details}"
+            )
+
+    @staticmethod
+    def schedule_descriptor(scenario: Scenario, schedule: list[ScheduledAction]) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        for offset, actor, action in schedule:
+            try:
+                index = scenario.actors[actor].index(action)
+            except (KeyError, ValueError) as error:
+                raise CommandError("schedule does not belong to the declared scenario") from error
+            result.append({"offset_ms": offset, "actor": actor, "action_index": index})
+        return result
+
+    @staticmethod
+    def requested_action_offsets(scenario: Scenario) -> list[dict[str, Any]]:
+        """Return declared offsets in actor/action order, independent of runtime time."""
+        return [
+            {"actor": actor, "action_index": index, "offset_ms": action.offset_ms}
+            for actor, actions in scenario.actors.items()
+            for index, action in enumerate(actions)
+        ]
+
+    @staticmethod
+    def _record_scheduler_trace(bundle: RunBundle) -> None:
+        scheduler = bundle.execution.get("scheduler")
+        if not isinstance(scheduler, dict) or bundle.trace is None:
+            return
+        scheduler["recorded_trace_timestamps"] = [
+            {
+                "timestamp_ms": event.timestamp_ms,
+                "actor": event.actor,
+                "type": event.type,
+                "name": event.name,
+            }
+            for event in bundle.trace.events
+        ]
+
+    @staticmethod
+    def schedule_from_descriptor(scenario: Scenario, descriptor: list[dict[str, Any]]) -> list[ScheduledAction]:
+        try:
+            return [(int(item["offset_ms"]), str(item["actor"]), scenario.actors[str(item["actor"])][int(item["action_index"])]) for item in descriptor]
+        except (KeyError, IndexError, TypeError, ValueError) as error:
+            raise CommandError("unsafe replay rejected: recorded schedule does not match its scenario") from error
+
+    def save(self, bundle: RunBundle, output: Path | None = None) -> Path:
+        validate_identifier(bundle.run_id, label="run id")
+        if output is None:
+            target = self._safe_output(bundle.run_id, "bundle.json")
+        else:
+            # Explicit CLI/Python destinations are caller-managed. Agent-facing
+            # methods never use this escape hatch.
+            target = output.resolve()
+        return bundle.write(target)
+
+    def bundle_path(self, run_id: str) -> Path:
+        """Return the framework-owned path for a saved run bundle."""
+        validate_identifier(run_id, label="run id")
+        return self._safe_output(run_id, "bundle.json")
+
+    def load_bundle(self, run_id: str) -> RunBundle:
+        """Load a framework-owned bundle by its repository-local run id."""
+        path = self.bundle_path(run_id)
+        if not path.is_file():
+            raise CommandError("run bundle not found")
+        try:
+            return RunBundle.model_validate_json(path.read_text())
+        except Exception as error:
+            raise CommandError(f"invalid run bundle {run_id}: {error}") from error
+
+    def diff(self, left: Path, right: Path) -> dict[str, Any]:
+        return diff_bundles(RunBundle.model_validate_json(left.read_text()), RunBundle.model_validate_json(right.read_text()))
+
+    def report(self, bundle_path: Path, output: Path | None = None) -> dict[str, Any]:
+        record = RunBundle.model_validate_json(bundle_path.read_text())
+        # A report is framework output; external bundle locations must not
+        # select a write destination. Explicit output is caller-managed.
+        destination = output or self._safe_output(record.run_id, "report.html")
+        events = record.trace.events if record.trace else []
+        # Bundles are external input at this boundary; redact again rather
+        # than trusting a producer's redaction declaration.
+        contents = json.dumps(redacted({"run_id": record.run_id, "result": record.result, "events": [event.model_dump(mode="json") for event in events]}), indent=2, default=str)
+        destination.write_text("<html><body><h1>WebMCP Resilience report</h1><pre>" + html.escape(contents) + "</pre></body></html>")
+        return {"schema_version": "1.0", "contract_version": "1.0", "engine_version": record.engine_version, "run_id": record.run_id, "output": str(destination), "passed": record.result.get("passed")}
+
+    async def run(self, scenario_path: Path | None = None, *, scenario: Scenario | dict[str, Any] | None = None, run_id: str | None = None, headless: bool = True,
+                  allow_mutations: bool = False, adversarial: bool = False, seed: int = 0,
+                  expected_capability_fingerprint: str | None = None,
+                  recorded_schedule: list[dict[str, Any]] | None = None,
+                  allowed_target_origins: Iterable[str] | None = None) -> RunBundle:
+        if (scenario_path is None) == (scenario is None):
+            raise CommandError("provide exactly one scenario path or in-memory scenario")
+        scenario = load_scenario(scenario_path) if scenario_path is not None else (scenario if isinstance(scenario, Scenario) else Scenario.model_validate(scenario))
+        self._validate_scenario_semantics(scenario)
+        _validate_state_requirements(self.config, scenario)
+        try:
+            validate_scenario_navigation(scenario, self.config.base_url, set(allowed_target_origins or ()))
+        except ValueError as error:
+            raise CommandError(f"scenario navigation rejected before browser execution: {error}") from error
+        initial_url = resolve_navigation_url(scenario.url, self.config.base_url)
+        self._validate_execution_policy(scenario, allow_mutations)
+        bundle = RunBundle.for_scenario("run", scenario, run_id=run_id)
+        bundle.agent_policy = agent_policy_snapshot(
+            [canonical_origin(origin) for origin in (allowed_target_origins or [self.config.base_url])],
+            mutation_permission=allow_mutations,
+            authority_source="command",
+        )
+        bundle.state_observation = build_state_observation(self.config, scenario)
+        bundle.approvals = [ApprovalRecord(authority="mutation_authorized" if allow_mutations else "read_only",
+                                           reason="--allow-mutations" if allow_mutations else "default read-only policy")]
+        bundle.actions = [dict(actor=actor, **action.model_dump(mode="json")) for actor, actions in scenario.actors.items() for action in actions]
+        bundle.faults = [fault.model_dump(mode="json") for fault in scenario.faults]
+        forced = self.schedule_from_descriptor(scenario, recorded_schedule) if recorded_schedule is not None else None
+        chosen = [forced] if forced is not None else (schedules(scenario, seed=seed) if adversarial else [None])
+        requirements = self._requirements(scenario)
+        bundle.requirements = requirements
+        bundle.compatibility.groups = requirements
+        bundle.execution = {
+            "adversarial": adversarial,
+            "seed": seed,
+            "schedule": None,
+            "schedule_index": None,
+            "requirements": requirements.model_dump(mode="json"),
+            "fault_configuration": bundle.faults,
+            "approval_policy": [approval.model_dump(mode="json") for approval in bundle.approvals],
+            "agent_policy": bundle.agent_policy,
+            "scheduler": {
+                "version": "1.0",
+                "requested_action_offsets": self.requested_action_offsets(scenario),
+                "selected_logical_schedule": None,
+                "adversarial_seed": seed,
+                "recorded_trace_timestamps": [],
+            },
+        }
+        output_root = self._safe_output(validate_identifier(bundle.run_id, label="run id"))
+        output_root.mkdir(parents=True, exist_ok=True)
+        last_error: Exception | None = None
+        for index, schedule in enumerate(chosen):
+            actual_schedule = schedule or [(action.offset_ms, actor, action) for actor, actions in scenario.actors.items() for action in actions]
+            # A new browser context for each schedule prevents state bleed between exploration variants.
+            async with BrowserClient(self.config.browser, headless=headless, args=self.config.browser_args, channel=self.config.browser_channel) as client:
+                assert client.page
+                await client.page.goto(initial_url)
+                readiness = WebMCPAdapter(client.page, self.config.state_script, self.config.from_origins)
+                await readiness.install()
+                probe = await readiness.probe()
+                fingerprint = hashlib.sha256(json.dumps(redacted(probe), sort_keys=True).encode()).hexdigest()[:16]
+                if expected_capability_fingerprint and fingerprint != expected_capability_fingerprint:
+                    raise CommandError("unsafe replay rejected: browser capability fingerprint differs from the recorded run")
+                bundle.preflight = redacted(probe)
+                bundle.browser_environment = redacted({"browser": self.config.browser, "headless": headless, "platform": platform.platform(), "url": client.page.url})
+                bundle.compatibility = Compatibility(browser=self.config.browser, headless=headless, capability_fingerprint=fingerprint, groups=requirements)
+                script_validation: dict[str, Any] | None = None
+                if self.config.state_script:
+                    try:
+                        state = await readiness.get_state()
+                        script_validation = {
+                            "status": "valid",
+                            "valid": True,
+                            "returns_object": True,
+                            "message": "state_script returned an observable state object.",
+                            "keys": sorted(state),
+                        }
+                    except Exception as error:
+                        script_validation = {
+                            "status": "invalid",
+                            "valid": False,
+                            "returns_object": False,
+                            "message": f"state_script must return an object: {error}",
+                        }
+                bundle.state_observation = build_state_observation(self.config, scenario, script_validation=script_validation)
+                if bundle.state_observation.validation.get("valid") is False:
+                    raise CommandError(
+                        f"{bundle.state_observation.validation.get('message')} Configure state_script to return the application's observable state object."
+                    )
+                network: list[dict[str, Any]] = []
+                client.page.on("response", lambda response: network.append({"url": response.url, "status": response.status, "method": response.request.method}))
+                runner = ScenarioRunner(client.page, scenario, self.config.state_script, self.config.from_origins, allow_mutations, base_url=self.config.base_url)
+                try:
+                    # Discovery is the only authoritative source for tool references when it is available.
+                    available_tools = await readiness.get_tools()
+                    self._validate_scenario_semantics(scenario, available_tools)
+                    trace = await runner.run(actual_schedule)
+                    bundle.trace = trace
+                    self._record_scheduler_trace(bundle)
+                    bundle.tool_inventory = list(runner.tools.values())
+                    bundle.state_changes = [event.model_dump(mode="json") for event in trace.events if event.type == "state.observed"]
+                    shot = output_root / f"schedule-{index}.png"
+                    await client.page.screenshot(path=str(shot), full_page=True)
+                    bundle.artifacts.append(Artifact(kind="screenshot", path=str(shot), description="final page state", redacted=False, sensitivity="potentially_sensitive"))
+                    network_path = self._safe_output(bundle.run_id, f"network-{index}.json"); self._safe_write(network_path, json.dumps(redacted(network), indent=2))
+                    bundle.artifacts.append(Artifact(kind="network", path=str(network_path), description="redacted response metadata", redacted=True, sensitivity="redacted"))
+                except Exception as error:
+                    last_error = error
+                    bundle.trace = runner.recorder.run
+                    self._record_scheduler_trace(bundle)
+                    bundle.tool_inventory = list(runner.tools.values())
+                    bundle.execution.update({"schedule": self.schedule_descriptor(scenario, actual_schedule), "schedule_index": index})
+                    bundle.execution["scheduler"]["selected_logical_schedule"] = bundle.execution["schedule"]
+                    failure = runner.write_failure(output_root / "failure.yaml", bundle.execution["schedule"], run_id=bundle.run_id, requirements=requirements.model_dump(mode="json"))
+                    bundle.artifacts.append(Artifact(kind="failure", path=str(failure), redacted=True, sensitivity="redacted", description="redacted diagnostic; replay bundle.json, not this file", run_id=bundle.run_id))
+                    shot = output_root / "failure.png"
+                    with suppress(Exception):
+                        await client.page.screenshot(path=str(shot), full_page=True)
+                        bundle.artifacts.append(Artifact(kind="screenshot", path=str(shot), description="failure page state", redacted=False, sensitivity="potentially_sensitive"))
+                    network_path = self._safe_output(bundle.run_id, "network-failure.json"); self._safe_write(network_path, json.dumps(redacted(network), indent=2))
+                    bundle.artifacts.append(Artifact(kind="network", path=str(network_path), description="redacted response metadata", redacted=True, sensitivity="redacted"))
+                    async def reproduces(candidate: Scenario) -> bool:
+                        async with BrowserClient(self.config.browser, headless=headless, args=self.config.browser_args, channel=self.config.browser_channel) as fresh:
+                            assert fresh.page
+                            await fresh.page.goto(resolve_navigation_url(candidate.url, self.config.base_url))
+                            try:
+                                candidate_schedule = [item for item in actual_schedule if item[1] in candidate.actors and item[2] in candidate.actors[item[1]]]
+                                await ScenarioRunner(fresh.page, candidate, self.config.state_script, self.config.from_origins, allow_mutations, base_url=self.config.base_url).run(candidate_schedule)
+                            except Exception:
+                                return True
+                            return False
+                    reduced = await reduce_failure(scenario, reproduces)
+                    repro = output_root / "repro.yaml"
+                    reduced_schedule = [item for item in actual_schedule if item[1] in reduced.actors and item[2] in reduced.actors[item[1]]]
+                    repro_execution = bundle.execution | {"schedule": self.schedule_descriptor(reduced, reduced_schedule)}
+                    self._safe_write(repro, yaml.safe_dump(redacted({"schema_version": bundle.schema_version, "run_id": bundle.run_id, "requirements": requirements.model_dump(mode="json"), "compatibility": bundle.compatibility.model_dump(mode="json"), "execution": repro_execution, "scenario": reduced.model_dump(mode="json")}), sort_keys=False))
+                    bundle.artifacts.append(Artifact(kind="scenario", path=str(repro), redacted=True, sensitivity="redacted", description="redacted minimized diagnostic with schedule; replay bundle.json", run_id=bundle.run_id))
+                    break
+        if not bundle.compatibility.capability_fingerprint:
+            bundle.compatibility = Compatibility(browser=self.config.browser, headless=headless, groups=requirements)
+        if bundle.execution["schedule"] is None and chosen:
+            bundle.execution.update({"schedule": self.schedule_descriptor(scenario, chosen[0] or [(action.offset_ms, actor, action) for actor, actions in scenario.actors.items() for action in actions]), "schedule_index": 0})
+            bundle.execution["scheduler"]["selected_logical_schedule"] = bundle.execution["schedule"]
+        bundle.result = {"passed": last_error is None, "error": str(last_error) if last_error else None, "schedules": len(chosen), "seed": seed, "contract_version": bundle.schema_version, "engine_version": bundle.compatibility.engine_version}
+        bundle.replay_command = ["webmcp", "replay", str(output_root / "bundle.json"), "--run-id", bundle.run_id]
+        if allow_mutations:
+            bundle.replay_command.append("--allow-mutations")
+        if last_error is not None:
+            bundle.result["failure_handoff"] = failure_handoff(bundle, output_root / "bundle.json")
+        if bundle.trace:
+            trace_path = output_root / "trace.json"
+            trace_path.parent.mkdir(parents=True, exist_ok=True)
+            self._safe_write(trace_path, json.dumps(redacted(bundle.trace.model_dump(mode="json")), indent=2, default=str))
+            bundle.artifacts.append(Artifact(kind="trace", path=str(trace_path), redacted=True, sensitivity="redacted"))
+        return bundle
+
+    def replay_bundle(self, path: Path, *, run_id: str | None = None) -> tuple[Scenario, int, RunBundle]:
+        try:
+            saved = RunBundle.model_validate_json(path.read_text())
+        except Exception as error:
+            raise CommandError(f"unsafe replay rejected: {path} is not a versioned run bundle: {error}") from error
+        if saved.schema_version != "2.0" or saved.compatibility.runner != "webmcp-resilience/2" or not saved.scenario:
+            raise CommandError("unsafe replay rejected: incompatible bundle version or missing scenario")
+        if saved.compatibility.browser and saved.compatibility.browser != self.config.browser:
+            raise CommandError(f"unsafe replay rejected: bundle requires {saved.compatibility.browser}, configured browser is {self.config.browser}")
+        scenario = Scenario.model_validate(saved.scenario)
+        self._validate_scenario_semantics(scenario)
+        requirements = saved.requirements
+        if requirements != saved.compatibility.groups or requirements.model_dump() != saved.execution.get("requirements"):
+            raise CommandError("unsafe replay rejected: inconsistent compatibility requirements")
+        if any(SUPPORTED_COMPATIBILITY_GROUPS.get(key) != value for key, value in requirements.model_dump().items()):
+            raise CommandError("unsafe replay rejected: incompatible compatibility groups")
+        fault_configuration = [fault.model_dump(mode="json") for fault in scenario.faults]
+        if saved.faults != fault_configuration or saved.execution.get("fault_configuration") != saved.faults:
+            raise CommandError("unsafe replay rejected: fault configuration differs from its scenario")
+        if saved.execution.get("approval_policy") != [approval.model_dump(mode="json") for approval in saved.approvals]:
+            raise CommandError("unsafe replay rejected: approval policy differs from the recorded bundle")
+        scheduler = saved.execution.get("scheduler")
+        recorded_schedule = scheduler.get("selected_logical_schedule") if isinstance(scheduler, dict) else saved.execution.get("schedule")
+        if not isinstance(recorded_schedule, list):
+            raise CommandError("unsafe replay rejected: bundle has no replayable recorded schedule")
+        if isinstance(scheduler, dict) and scheduler.get("version") != "1.0":
+            raise CommandError("unsafe replay rejected: unsupported scheduler evidence version")
+        if isinstance(scheduler, dict) and isinstance(saved.execution.get("schedule"), list) and recorded_schedule != saved.execution["schedule"]:
+            raise CommandError("unsafe replay rejected: scheduler evidence disagrees with execution schedule")
+        self.schedule_from_descriptor(scenario, recorded_schedule)
+        return scenario, int(saved.execution.get("seed", saved.result.get("seed", 0))), saved
+
+    async def replay(self, path: Path, *, run_id: str | None = None, headless: bool = True,
+                     allow_mutations: bool = False,
+                     allowed_target_origins: Iterable[str] | None = None) -> RunBundle:
+        """Replay a contract bundle without any frontend-specific filesystem shim."""
+        scenario, seed, saved = self.replay_bundle(path)
+        result = await self.run(None, scenario=scenario, run_id=run_id, headless=headless,
+                                allow_mutations=allow_mutations,
+                                adversarial=bool(saved.execution["adversarial"]), seed=seed,
+                                recorded_schedule=(saved.execution.get("scheduler", {}).get("selected_logical_schedule", saved.execution["schedule"])
+                                                   if isinstance(saved.execution.get("scheduler"), dict) else saved.execution["schedule"]),
+                                expected_capability_fingerprint=saved.compatibility.capability_fingerprint,
+                                allowed_target_origins=allowed_target_origins)
+        result.command = "replay"
+        return result
+
+
+def diff_bundles(left: RunBundle, right: RunBundle) -> dict[str, Any]:
+    """Stable structural comparison for CI and the console baseline lane."""
+    left_events = [(event.actor, event.type, event.name) for event in (left.trace.events if left.trace else [])]
+    right_events = [(event.actor, event.type, event.name) for event in (right.trace.events if right.trace else [])]
+    browser_left = {"browser": left.compatibility.browser, "version": left.compatibility.browser_version,
+                    "headless": left.compatibility.headless, "fingerprint": left.compatibility.capability_fingerprint}
+    browser_right = {"browser": right.compatibility.browser, "version": right.compatibility.browser_version,
+                     "headless": right.compatibility.headless, "fingerprint": right.compatibility.capability_fingerprint}
+    return {"schema_version": "1.0", "contract_version": "1.0", "engine_version": left.engine_version, "left": left.run_id, "right": right.run_id,
+            "result_changed": left.result.get("passed") != right.result.get("passed"),
+            "browser_changed": browser_left != browser_right, "browser_left": browser_left, "browser_right": browser_right,
+            "events_only_left": [item for item in left_events if item not in right_events],
+            "events_only_right": [item for item in right_events if item not in left_events]}

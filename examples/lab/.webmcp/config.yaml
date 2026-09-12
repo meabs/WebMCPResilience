@@ -1,0 +1,4 @@
+base_url: http://127.0.0.1:4173
+browser: chromium
+browser_args: []
+state_script: window.__resilienceLab.getState()

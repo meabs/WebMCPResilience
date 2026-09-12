@@ -1,0 +1,24 @@
+name: llm-stale-write
+url: /bench/llm_inference_serving
+state:
+  tool: get_bench_snapshot
+actors:
+  agent_a:
+    - at: 0ms
+      invoke: set_fault_profile
+      args:
+        targetId: vertex_rc
+        latencyMs: 1500
+        packetLossPercent: 0
+        expectedVersion: ${state.currentVersion}
+  agent_b:
+    - at: 0ms
+      invoke: set_fault_profile
+      args:
+        targetId: vertex_rc
+        latencyMs: 1500
+        packetLossPercent: 0
+        expectedVersion: ${state.currentVersion}
+result_invariants:
+  - results.set_fault_profile.OK == 1
+  - results.set_fault_profile.STALE_STATE == 1

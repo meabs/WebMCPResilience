@@ -1,0 +1,20 @@
+name: lab-smoke
+url: /
+actors:
+  agent:
+    - at: 0ms
+      invoke: create_record
+      args:
+        text: Created by a WebMCP invocation.
+    - at: 40ms
+      invoke: complete_next_record
+  human:
+    - at: 15ms
+      action: fill
+      selector: '#note'
+      value: Created by a human interaction.
+    - at: 25ms
+      action: click
+      selector: '#add'
+invariants:
+  - records.completed <= records.created

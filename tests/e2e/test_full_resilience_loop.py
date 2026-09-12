@@ -1,0 +1,180 @@
+"""Browser-backed proof of the portable CLI/console/MCP resilience loop."""
+from __future__ import annotations
+
+import asyncio
+import json
+from pathlib import Path
+from threading import Thread
+
+import pytest
+import yaml
+from typer.testing import CliRunner
+
+from webmcp_resilience.agent_control import AgentPolicy, LocalMCPControlAdapter
+from webmcp_resilience.cli import app
+from webmcp_resilience.commands import CommandAPI
+from webmcp_resilience.config import Config
+from webmcp_resilience.demo import create_server
+from webmcp_resilience.models.bundle import redact_recursive
+
+
+pytestmark = pytest.mark.e2e
+
+
+@pytest.fixture
+def lab_server() -> str:
+    server = create_server(port=0)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+
+def scenario_path(project: Path) -> Path:
+    path = project / ".webmcp" / "scenarios" / "vulnerable-human-tool-race.yaml"
+    path.parent.mkdir(parents=True)
+    source = Path(__file__).parents[2] / "examples" / "resilience-forge" / ".webmcp" / "scenarios" / path.name
+    path.write_text(source.read_text())
+    return path
+
+
+def decode(output: str) -> dict:
+    for line in reversed(output.strip().splitlines()):
+        try:
+            return json.loads(line)
+        except json.JSONDecodeError:
+            continue
+    raise AssertionError(f"no JSON response in output: {output!r}")
+
+
+def test_cli_full_loop_replays_a_redacted_adversarial_failure(
+    tmp_path: Path, lab_server: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Preflight, validate, race, reduce, replay, diff, and console all agree."""
+    monkeypatch.chdir(tmp_path)
+    webmcp = tmp_path / ".webmcp"
+    webmcp.mkdir()
+    (webmcp / "config.yaml").write_text(
+        f"base_url: {lab_server}\nbrowser: chromium\nbrowser_args: []\n"
+        "state_script: window.__resilienceLab.getState()\n"
+    )
+    scenario = scenario_path(tmp_path)
+    runner = CliRunner()
+
+    inspected = runner.invoke(app, ["preflight", "--path", "/", "--ci", "--run-id", "inspect", "--json"])
+    assert inspected.exit_code == 0, inspected.output
+    inspected_payload = decode(inspected.output)
+    assert inspected_payload["result"]["passed"] is True
+    assert inspected_payload["state_observation"]["mode"] == "state_script"
+    assert inspected_payload["state_observation"]["validation"]["valid"] is True
+
+    validated = runner.invoke(app, ["validate", str(scenario), "--run-id", "validated", "--json"])
+    assert validated.exit_code == 0, validated.output
+    assert decode(validated.output)["result"]["passed"] is True
+
+    failed = runner.invoke(
+        app,
+        [
+            "run", str(scenario), "--ci", "--adversarial", "--seed", "7",
+            "--allow-mutations", "--run-id", "race-failure", "--json",
+        ],
+    )
+    assert failed.exit_code == 1, failed.output
+    failed_payload = decode(failed.output)
+    assert failed_payload["result"]["passed"] is False
+    assert failed_payload["result"]["failure_handoff"]["failed_invariant"] == "claims.active <= claims.capacity"
+    assert failed_payload["result"]["failure_handoff"]["bundle_path"].endswith("race-failure/bundle.json")
+    failure_bundle = webmcp / "runs" / "race-failure" / "bundle.json"
+    failure_json = json.loads(failure_bundle.read_text())
+    assert failure_json["state_observation"]["mode"] == "state_script"
+    assert failure_json["state_observation"]["validation"]["valid"] is True
+    assert failure_json["execution"]["schedule"]
+    scheduler = failure_json["execution"]["scheduler"]
+    assert scheduler["version"] == "1.0"
+    assert scheduler["adversarial_seed"] == 7
+    assert scheduler["selected_logical_schedule"] == failure_json["execution"]["schedule"]
+    assert scheduler["requested_action_offsets"]
+    assert [item["action_index"] for item in scheduler["selected_logical_schedule"]] == [0, 0, 1, 1]
+    assert scheduler["recorded_trace_timestamps"]
+    assert any(item["kind"] == "failure" for item in failure_json["artifacts"])
+    assert any(item["kind"] == "scenario" for item in failure_json["artifacts"])
+    trace_types = [event["type"] for event in failure_json["trace"]["events"]]
+    assert trace_types.count("tool.invoke") == 1
+    assert trace_types.index("tool.invoke") < trace_types.index("scheduler.concurrent_dispatch") < trace_types.index("ui.click")
+    failed_state = next(event["state_snapshot"] for event in failure_json["trace"]["events"] if event["type"] == "invariant.fail")
+    assert failed_state["claims"]["active"] == 2
+    repro_path = Path(next(item["path"] for item in failure_json["artifacts"] if item["kind"] == "scenario"))
+    repro = yaml.safe_load(repro_path.read_text())
+    assert [action.get("invoke") or action.get("action") for actions in repro["scenario"]["actors"].values() for action in actions] == ["claim_slot", "click", "wait"]
+
+    # Persisted bundles are already redacted. Copying the JSON models the
+    # handoff to a developer or coding agent in another directory.
+    redacted_copy = tmp_path / "handoff-bundle.json"
+    redacted_copy.write_text(json.dumps(redact_recursive(failure_json)))
+    replayed = runner.invoke(
+        app,
+        [
+            "replay", str(redacted_copy), "--ci", "--allow-mutations",
+            "--run-id", "race-replay", "--json",
+        ],
+    )
+    assert replayed.exit_code == 1, replayed.output
+    replay_payload = decode(replayed.output)
+    assert replay_payload["result"]["passed"] is False
+    replay_bundle = webmcp / "runs" / "race-replay" / "bundle.json"
+    replay_json = json.loads(replay_bundle.read_text())
+    assert replay_json["execution"]["schedule"] == failure_json["execution"]["schedule"]
+    assert replay_json["execution"]["scheduler"]["selected_logical_schedule"] == scheduler["selected_logical_schedule"]
+
+    diff = runner.invoke(app, ["diff", str(failure_bundle), str(replay_bundle), "--json"])
+    assert diff.exit_code == 0, diff.output
+    assert decode(diff.output)["result_changed"] is False
+
+    console = runner.invoke(app, ["console", str(failure_bundle), "--print"])
+    assert console.exit_code == 0, console.output
+    assert "invariant.fail" in console.output
+
+
+def test_local_mcp_control_executes_the_same_loop_and_policy(
+    tmp_path: Path, lab_server: str
+) -> None:
+    """Typed local MCP control uses the same browser runner and replay policy."""
+    config = Config(base_url=lab_server, state_script="window.__resilienceLab.getState()")
+    path = scenario_path(tmp_path)
+    adapter = LocalMCPControlAdapter(
+        CommandAPI(config, output_dir=tmp_path / ".webmcp" / "runs"),
+        AgentPolicy(tmp_path, lab_server, mutation_permission=True, approval_context="CI fixture approval"),
+    )
+
+    inspected = asyncio.run(adapter.call("preflight", {"path": "/", "run_id": "agent-inspect"}))
+    assert inspected["result"]["passed"] is True
+    validated = asyncio.run(adapter.call("validate_scenario", {
+        "scenario_id": path.relative_to(tmp_path).as_posix(), "run_id": "agent-validated",
+    }))
+    assert validated["result"]["passed"] is True
+    executed = asyncio.run(adapter.call("run_scenario", {
+        "scenario_id": path.relative_to(tmp_path).as_posix(),
+        "adversarial": True,
+        "seed": 7,
+        "run_id": "agent-failure",
+    }))
+    assert executed["result"]["passed"] is False
+    assert executed["bundle"]["approvals"][-1]["source"] == "agent_policy"
+    assert executed["bundle"]["agent_policy"]["mutation_authority"] == "mutation_authorized"
+    assert executed["bundle"]["state_observation"]["validation"]["valid"] is True
+
+    evidence = asyncio.run(adapter.call("get_failure_or_repro", {
+        "run_id": "agent-failure", "artifact": "failure",
+    }))
+    assert evidence["artifact"] == "failure"
+    assert "failed_invariant" in evidence["contents"]
+
+    replayed = asyncio.run(adapter.call("replay_run", {
+        "source_run_id": "agent-failure", "run_id": "agent-replay",
+    }))
+    assert replayed["result"]["passed"] is False
+    assert replayed["bundle"]["execution"]["schedule"] == executed["bundle"]["execution"]["schedule"]

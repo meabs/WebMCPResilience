@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>WebMCP Resilience Lab</title>
+    <link rel="stylesheet" href="style.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <p class="kicker">WebMCP Resilience Lab</p>
+          <h1>Exercise a live, shared state.</h1>
+          <p class="lede">Use the controls as a human while the resilience runner invokes the same tools. This lab starts empty; every record below was created during this browser session.</p>
+        </div>
+        <p id="api-status" class="status">Registering WebMCP tools…</p>
+      </header>
+
+      <section class="race-callout" aria-labelledby="race-title">
+        <div>
+          <p class="eyebrow">Failure fixture</p>
+          <h2 id="race-title">One slot. Two control surfaces.</h2>
+          <p>The <code>claim_slot</code> tool and the button below share state. Both callers can observe an available slot before the delayed commit. Run the companion scenario to make the race fail on purpose.</p>
+        </div>
+        <div class="race-path" aria-label="Race path">
+          <span>agent.invoke</span><b>↘</b><strong>shared slot</strong><b>↗</b><span>human.click</span>
+        </div>
+      </section>
+
+      <section class="workbench" aria-label="Shared state test workbench">
+        <section class="panel controls">
+          <h2>Human controls</h2>
+          <button id="claim" type="button" class="claim-button">Claim the single slot</button>
+          <p id="claim-status" class="claim-status" aria-live="polite">slot available</p>
+          <p class="help">This button calls the same vulnerable operation as the WebMCP tool. <span class="capacity-tag">capacity <strong id="claim-capacity">1</strong></span></p>
+          <hr>
+          <h2>Session records</h2>
+          <label for="note">New record</label>
+          <div class="entry">
+            <input id="note" placeholder="Describe a real action to record" autocomplete="off">
+            <button id="add" type="button">Add record</button>
+          </div>
+          <div class="buttons">
+            <button id="complete" type="button">Complete next</button>
+            <button id="clear" type="button" class="quiet">Clear session</button>
+          </div>
+          <label for="limit">Completion guardrail <output id="limit-output">0</output></label>
+          <input id="limit" type="range" min="0" max="12" value="0">
+          <p class="help">A guardrail of 0 means no completion cap. Adjust it to make the invariant meaningful for your own scenario.</p>
+        </section>
+
+        <section class="panel state-panel" aria-live="polite">
+          <div class="state-head"><h2>Observable state</h2><span id="revision">revision 0</span></div>
+          <dl class="metrics">
+            <div><dt>Claims</dt><dd id="claim-count">0</dd></div>
+            <div><dt>Created</dt><dd id="created">0</dd></div>
+            <div><dt>Completed</dt><dd id="completed">0</dd></div>
+            <div><dt>Guardrail</dt><dd id="guardrail">none</dd></div>
+          </dl>
+          <ol id="records" aria-label="Session records"></ol>
+          <p id="empty">No records yet. Add one from the human controls or call <code>create_record</code>.</p>
+        </section>
+      </section>
+
+      <section class="panel tools">
+        <h2>Registered tools</h2>
+        <p>Discovery is driven by <code>document.modelContext</code>. The fallback host is only used if this browser does not yet expose native WebMCP.</p>
+        <ul id="tool-list"></ul>
+      </section>
+    </main>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

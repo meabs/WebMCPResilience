@@ -1,0 +1,409 @@
+{
+  "schema_version": "0.1",
+  "started_at": "2026-09-11T22:58:14.286481Z",
+  "scenario": "lab-smoke",
+  "events": [
+    {
+      "timestamp_ms": 5,
+      "actor": "system",
+      "type": "scenario.start",
+      "name": null,
+      "invocation_id": null,
+      "data": {},
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 10,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "clear_records",
+      "invocation_id": null,
+      "data": {
+        "name": "clear_records",
+        "description": "Remove all records created in this browser session.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        },
+        "outputSchema": null,
+        "annotations": {
+          "consequentialHint": true
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 10,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "complete_next_record",
+      "invocation_id": null,
+      "data": {
+        "name": "complete_next_record",
+        "description": "Complete the oldest open session record.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        },
+        "outputSchema": null,
+        "annotations": null
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 10,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "create_record",
+      "invocation_id": null,
+      "data": {
+        "name": "create_record",
+        "description": "Create a session record with user-provided text.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "text"
+          ]
+        },
+        "outputSchema": null,
+        "annotations": null
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 10,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "get_observable_state",
+      "invocation_id": null,
+      "data": {
+        "name": "get_observable_state",
+        "description": "Read the current session state without modifying it.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": true
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 10,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "set_completion_guardrail",
+      "invocation_id": null,
+      "data": {
+        "name": "set_completion_guardrail",
+        "description": "Set the maximum number of records that may be completed; zero removes the cap.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "limit"
+          ]
+        },
+        "outputSchema": null,
+        "annotations": null
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 13,
+      "actor": "agent",
+      "type": "tool.invoke",
+      "name": "create_record",
+      "invocation_id": "d199b7b5-5e6f-4768-a87f-9b9ae04ad78c",
+      "data": {
+        "args": {
+          "text": "Created by a WebMCP invocation."
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 15,
+      "actor": "agent",
+      "type": "tool.result",
+      "name": "create_record",
+      "invocation_id": "d199b7b5-5e6f-4768-a87f-9b9ae04ad78c",
+      "data": {
+        "result": {
+          "created": 1,
+          "revision": 1
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 17,
+      "actor": "system",
+      "type": "state.observed",
+      "name": null,
+      "invocation_id": null,
+      "data": {},
+      "state_snapshot": {
+        "records": {
+          "created": 1,
+          "completed": 0
+        },
+        "guardrail": {
+          "limit": 0
+        },
+        "revision": 1
+      }
+    },
+    {
+      "timestamp_ms": 17,
+      "actor": "system",
+      "type": "invariant.pass",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "expression": "records.completed <= records.created"
+      },
+      "state_snapshot": {
+        "records": {
+          "created": 1,
+          "completed": 0
+        },
+        "guardrail": {
+          "limit": 0
+        },
+        "revision": 1
+      }
+    },
+    {
+      "timestamp_ms": 41,
+      "actor": "agent",
+      "type": "tool.invoke",
+      "name": "complete_next_record",
+      "invocation_id": "0ce8ee0f-7557-4636-b361-2c24529fbe28",
+      "data": {
+        "args": {}
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 50,
+      "actor": "human",
+      "type": "ui.fill",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "at": "15ms",
+        "action": "fill",
+        "selector": "#note",
+        "value": "Created by a human interaction.",
+        "args": {}
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 50,
+      "actor": "agent",
+      "type": "tool.result",
+      "name": "complete_next_record",
+      "invocation_id": "0ce8ee0f-7557-4636-b361-2c24529fbe28",
+      "data": {
+        "result": {
+          "completed": true,
+          "totals": {
+            "created": 1,
+            "completed": 1
+          }
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 51,
+      "actor": "system",
+      "type": "state.observed",
+      "name": null,
+      "invocation_id": null,
+      "data": {},
+      "state_snapshot": {
+        "records": {
+          "created": 1,
+          "completed": 1
+        },
+        "guardrail": {
+          "limit": 0
+        },
+        "revision": 2
+      }
+    },
+    {
+      "timestamp_ms": 51,
+      "actor": "system",
+      "type": "invariant.pass",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "expression": "records.completed <= records.created"
+      },
+      "state_snapshot": {
+        "records": {
+          "created": 1,
+          "completed": 1
+        },
+        "guardrail": {
+          "limit": 0
+        },
+        "revision": 2
+      }
+    },
+    {
+      "timestamp_ms": 51,
+      "actor": "system",
+      "type": "state.observed",
+      "name": null,
+      "invocation_id": null,
+      "data": {},
+      "state_snapshot": {
+        "records": {
+          "created": 1,
+          "completed": 1
+        },
+        "guardrail": {
+          "limit": 0
+        },
+        "revision": 2
+      }
+    },
+    {
+      "timestamp_ms": 51,
+      "actor": "system",
+      "type": "invariant.pass",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "expression": "records.completed <= records.created"
+      },
+      "state_snapshot": {
+        "records": {
+          "created": 1,
+          "completed": 1
+        },
+        "guardrail": {
+          "limit": 0
+        },
+        "revision": 2
+      }
+    },
+    {
+      "timestamp_ms": 69,
+      "actor": "human",
+      "type": "ui.click",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "at": "25ms",
+        "action": "click",
+        "selector": "#add",
+        "args": {}
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 70,
+      "actor": "system",
+      "type": "state.observed",
+      "name": null,
+      "invocation_id": null,
+      "data": {},
+      "state_snapshot": {
+        "records": {
+          "created": 2,
+          "completed": 1
+        },
+        "guardrail": {
+          "limit": 0
+        },
+        "revision": 3
+      }
+    },
+    {
+      "timestamp_ms": 70,
+      "actor": "system",
+      "type": "invariant.pass",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "expression": "records.completed <= records.created"
+      },
+      "state_snapshot": {
+        "records": {
+          "created": 2,
+          "completed": 1
+        },
+        "guardrail": {
+          "limit": 0
+        },
+        "revision": 3
+      }
+    },
+    {
+      "timestamp_ms": 70,
+      "actor": "system",
+      "type": "state.observed",
+      "name": null,
+      "invocation_id": null,
+      "data": {},
+      "state_snapshot": {
+        "records": {
+          "created": 2,
+          "completed": 1
+        },
+        "guardrail": {
+          "limit": 0
+        },
+        "revision": 3
+      }
+    },
+    {
+      "timestamp_ms": 70,
+      "actor": "system",
+      "type": "invariant.pass",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "expression": "records.completed <= records.created"
+      },
+      "state_snapshot": {
+        "records": {
+          "created": 2,
+          "completed": 1
+        },
+        "guardrail": {
+          "limit": 0
+        },
+        "revision": 3
+      }
+    },
+    {
+      "timestamp_ms": 70,
+      "actor": "system",
+      "type": "scenario.end",
+      "name": null,
+      "invocation_id": null,
+      "data": {},
+      "state_snapshot": {}
+    }
+  ]
+}

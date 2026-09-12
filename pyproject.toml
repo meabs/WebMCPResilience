@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "webmcp-resilience"
+version = "0.1.0"
+description = "Adversarial resilience testing for WebMCP-enabled web applications"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "Apache-2.0"}
+dependencies = [
+  "playwright>=1.54",
+  "pydantic>=2.11",
+  "PyYAML>=6.0",
+  "rich>=14.0",
+  "typer>=0.16",
+  "textual>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.4", "pytest-asyncio>=1.0", "hypothesis>=6.0", "hypothesis-jsonschema>=0.23"]
+
+[project.scripts]
+webmcp = "webmcp_resilience.cli:app"
+
+[project.entry-points.pytest11]
+webmcp_resilience = "webmcp_resilience.pytest_plugin"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+  "e2e: browser-backed tests that require a local Chromium installation",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/webmcp_resilience"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"examples/lab" = "webmcp_resilience/lab"
+"examples/resilience-forge" = "webmcp_resilience/resilience_forge"
+
+[tool.hatch.build.targets.sdist]
+include = ["/src", "/examples", "/docs", "/README.md", "/LICENSE"]

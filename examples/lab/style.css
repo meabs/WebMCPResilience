@@ -1,0 +1,39 @@
+:root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #101722; color: #eaf2f3; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; }
+main { max-width: 1120px; margin: auto; padding: 56px 28px 80px; }
+header { display: flex; justify-content: space-between; gap: 28px; align-items: flex-start; padding-bottom: 42px; border-bottom: 1px solid #385063; }
+.kicker { color: #3bd4d1; font-size: .8rem; font-weight: 700; letter-spacing: .06em; margin: 0 0 12px; }
+h1 { max-width: 720px; font-size: clamp(2.35rem, 6vw, 4.7rem); letter-spacing: -.06em; line-height: .95; margin: 0; }
+h2 { font-size: 1rem; margin: 0 0 24px; }
+.lede { color: #b2c3cb; font-size: 1.08rem; line-height: 1.55; max-width: 670px; margin: 20px 0 0; }
+.status { color: #101722; background: #3bd4d1; border-radius: 100px; padding: 8px 12px; white-space: nowrap; font-size: .83rem; font-weight: 700; margin: 0; }
+.race-callout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, .7fr); align-items: center; gap: 30px; margin-top: 26px; padding: 24px 26px; background: #2a2020; border: 1px solid #9a5f4d; }
+.race-callout h2 { color: #ffcf8f; margin-bottom: 10px; }
+.race-callout p { color: #e4c4b9; line-height: 1.5; margin: 0; max-width: 660px; }
+.eyebrow { color: #ff8b7b !important; font-size: .75rem; font-weight: 800; letter-spacing: .08em; margin-bottom: 8px !important; text-transform: uppercase; }
+.race-path { display: grid; grid-template-columns: 1fr auto 1.2fr auto 1fr; align-items: center; gap: 8px; color: #ffcf8f; font-size: .78rem; text-align: center; }
+.race-path strong { padding: 18px 8px; border: 1px dashed #ff8b7b; color: #fff0dd; font-size: .88rem; }
+.race-path b { color: #ff8b7b; font-size: 1.2rem; }
+.workbench { display: grid; grid-template-columns: minmax(290px, .9fr) minmax(340px, 1.3fr); gap: 18px; margin-top: 28px; }
+.panel { background: #1e2b3a; border: 1px solid #385063; padding: 26px; }
+label { display: block; color: #b2c3cb; font-size: .86rem; margin: 20px 0 8px; }
+input { background: #101722; border: 1px solid #526b7d; color: #eaf2f3; font: inherit; min-width: 0; padding: 11px 12px; width: 100%; }
+.entry { display: flex; gap: 9px; }
+.entry input { flex: 1; }
+button { background: #3bd4d1; border: 0; color: #101722; cursor: pointer; font: inherit; font-weight: 750; padding: 11px 14px; }
+button:hover { background: #74efea; } button:focus-visible, input:focus-visible { outline: 3px solid #ffb45b; outline-offset: 3px; }
+.claim-button { width: 100%; background: #ffb45b; }
+.claim-button:hover { background: #ffd08e; }
+.claim-status { color: #8ca2ae; margin: 13px 0 0; }
+.claim-status.claimed { color: #3bd4d1; }
+.claim-status.danger { color: #ff8b7b; font-weight: 800; }
+hr { border: 0; border-top: 1px solid #385063; margin: 26px 0; }
+.buttons { display: flex; gap: 9px; margin-top: 12px; } .quiet { background: #385063; color: #eaf2f3; }
+.help, .tools p { color: #b2c3cb; font-size: .9rem; line-height: 1.5; }
+.state-head { align-items: baseline; display: flex; justify-content: space-between; } #revision { color: #8ca2ae; font-size: .82rem; }
+.metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 0 0 22px; }.metrics div { background: #101722; padding: 13px; }.metrics dt { color: #8ca2ae; font-size: .78rem; }.metrics dd { font-size: 1.8rem; font-weight: 750; margin: 4px 0 0; }
+#records { list-style: none; margin: 0; padding: 0; } #records li { border-top: 1px solid #385063; display: flex; justify-content: space-between; gap: 12px; padding: 12px 0; } .done { color: #3bd4d1; }
+#empty { color: #8ca2ae; } .tools { margin-top: 18px; } #tool-list { columns: 2; padding-left: 20px; } #tool-list li { padding: 4px 0; color: #d4e1e3; } code { color: #ffcf8f; }
+@media (max-width: 720px) { main { padding: 32px 18px; } header, .workbench, .race-callout { display: block; } .status { display: inline-block; margin-top: 20px; } .state-panel, .tools { margin-top: 18px; } .race-path { margin-top: 22px; } .metrics { grid-template-columns: repeat(2, 1fr); } #tool-list { columns: 1; } }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; transition: none !important; } }

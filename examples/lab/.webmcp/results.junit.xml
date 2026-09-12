@@ -1,0 +1,2 @@
+<?xml version='1.0' encoding='utf-8'?>
+<testsuite name="webmcp-resilience" tests="1" failures="0"><testcase classname="webmcp_resilience" name="lab-smoke" time="0.343" /></testsuite>

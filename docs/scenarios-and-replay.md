@@ -1,0 +1,108 @@
+# Scenarios, scheduling, and replay
+
+## The scenario contract
+
+A scenario is portable YAML. It declares exactly the interactions that may be
+run; the engine does not create tool arguments, selectors, records, or state on
+its own.
+
+```yaml
+name: concurrent-tool-and-ui
+url: /checkout
+actors:
+  agent:
+    - at: 0ms
+      invoke: reserve_inventory
+      args: {sku: "sku-42", quantity: 1}
+  human:
+    - at: 0ms
+      action: click
+      selector: '#reserve'
+faults:
+  - type: latency
+    tool: reserve_inventory
+    duration_ms: 500
+    at: before_invoke
+invariants:
+  - inventory.reserved <= inventory.available
+```
+
+Each action has exactly one operation: `invoke`, `retry`, `cancel`, or a UI
+`action`. Supported UI actions are `click`, `fill`, `select`, `navigate`, and
+`wait`. Times are integer milliseconds such as `0ms` or `250ms`.
+
+## State: two explicit mechanisms
+
+`state_script` in `.webmcp/config.yaml` returns the object checked by state
+invariants. It runs inside the page and must return an object.
+
+```yaml
+state_script: window.__app.getObservableState()
+```
+
+`scenario.state.tool` is different: it declares a discovered read-only WebMCP
+tool whose result is resolved into action arguments.
+
+```yaml
+state:
+  tool: get_checkout_snapshot
+actors:
+  agent:
+    - invoke: confirm_order
+      args: {expectedVersion: ${state.version}}
+```
+
+Neither mechanism silently reads network traffic or arbitrary DOM content.
+
+## Faults
+
+| Fault | Timing | Effect |
+| --- | --- | --- |
+| `latency` | `before_invoke`, `after_invoke` | Delays an invocation at a declared point. |
+| `timeout` | `before_invoke` | Bounds the call duration. |
+| `duplicate_invocation` | `before_invoke`, `after_invoke` | Repeats the resolved call once. |
+| `cancellation` | `before_invoke` | Cancels an in-flight call. |
+| `navigation` | `before_invoke`, `after_invoke` | Performs declared browser navigation. |
+| `http_error` | `before_invoke` | Routes matching browser HTTP traffic to a declared response status. |
+
+Fault timing is explicit. Unsupported timing combinations are validation errors.
+
+## Scheduling semantics
+
+`--adversarial --seed N` explores bounded permutations of simultaneous,
+declared actions in fresh browser sessions. The selected schedule and seed are
+saved to the run bundle.
+
+For a same-offset group, eligible WebMCP tool promises are started in page
+context before the runner sends the accompanying UI action. That allows the UI
+to begin before the tool result is awaited. Playwright page commands remain
+transport-serialised, so the promise is **logical actor concurrency**, not a
+claim of sub-frame, CDP-level, or microtask-level control.
+
+The bundle records requested offsets, selected schedule, seed, and trace event
+timestamps. Replay validates compatibility, then uses the recorded logical
+schedule; it does not re-roll exploration.
+
+## Failure reduction and replay
+
+When a run fails, the reducer removes declared actions only when a fresh browser
+session still reproduces the failure. It does not edit traces, substitute data,
+or guess new arguments.
+
+```bash
+.venv/bin/webmcp replay .webmcp/runs/<run-id>/bundle.json --ci --json
+```
+
+Replay rejects incompatible artifacts, including a changed capability
+fingerprint. This is intentional: a bundle is evidence of a specific execution
+environment, not a request to reinterpret old behaviour against a new runtime.
+
+## Evidence bundle
+
+`bundle.json` is the handoff contract. It includes compatibility requirements,
+browser evidence, preflight output, scenario, schedules, trace, state
+observations, policy approvals, artifacts, result, and replay command.
+
+Textual structured evidence and URL credentials are recursively redacted.
+Screenshots are marked potentially sensitive and remain metadata-only through
+the console and agent-control interfaces.

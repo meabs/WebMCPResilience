@@ -1,0 +1,31 @@
+name: vulnerable-human-tool-race
+url: /
+actors:
+  agent:
+    - at: 0ms
+      invoke: claim_slot
+      args:
+        actor: agent
+    - at: 450ms
+      action: wait
+      value: '1'
+  human:
+    - at: 0ms
+      action: click
+      selector: '#claim'
+    - at: 350ms
+      action: wait
+      value: '1'
+invariants:
+  - claims.active <= claims.capacity
+compatibility:
+  schema: webmcp-resilience/scenario-1
+  requires:
+    scenario: '1'
+    fault_model: '1'
+    invariant_model: '1'
+    trace_model: '1'
+    browser_webmcp_adapter: '1'
+metadata:
+  purpose: 'Documented vulnerable human/UI plus WebMCP tool race.'
+  expected_failure: 'Both callers pass the availability check and deferred-commit two claims into one slot.'

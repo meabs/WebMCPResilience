@@ -1,0 +1,3342 @@
+{
+  "schema_version": "0.1",
+  "started_at": "2026-09-12T08:35:01.566565Z",
+  "scenario": "llm-stale-write",
+  "events": [
+    {
+      "timestamp_ms": 21,
+      "actor": "system",
+      "type": "scenario.start",
+      "name": null,
+      "invocation_id": null,
+      "data": {},
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "add_read_replica",
+      "invocation_id": null,
+      "data": {
+        "name": "add_read_replica",
+        "description": "Add a same-region Cloud SQL read replica for the zonal failure path. Legal even when no_second_region is pinned.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "enum": [
+                "web_client",
+                "api_gateway",
+                "cloud_run_order",
+                "pubsub_ordered",
+                "cloud_run_payment",
+                "cloud_sql",
+                "memorystore",
+                "global_alb",
+                "cloud_run_europe",
+                "cloud_run_us",
+                "app_europe",
+                "app_us",
+                "cloud_sql_primary",
+                "cloud_sql_replica",
+                "clients",
+                "cloud_run_router",
+                "vertex_stable",
+                "vertex_rc",
+                "pubsub_overflow"
+              ]
+            },
+            "expectedVersion": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "id",
+            "expectedVersion"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": false,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "apply_remediation_plan",
+      "invocation_id": null,
+      "data": {
+        "name": "apply_remediation_plan",
+        "description": "Apply several legal mutations as one all-or-nothing transaction with a single expectedVersion and one version bump.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "steps": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 8,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "type": "string"
+                  },
+                  "args": {
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "op"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "expectedVersion": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "steps",
+            "expectedVersion"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": false,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "clear_all_faults",
+      "invocation_id": null,
+      "data": {
+        "name": "clear_all_faults",
+        "description": "Clear every injected latency and packet-loss profile while preserving load, scaling, traffic split, pins, and zone state.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "expectedVersion": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "expectedVersion"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": false,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "clear_fault_profile",
+      "invocation_id": null,
+      "data": {
+        "name": "clear_fault_profile",
+        "description": "Clear injected latency and packet loss from one component or connection.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "targetId": {
+              "type": "string",
+              "enum": [
+                "web_client",
+                "api_gateway",
+                "cloud_run_order",
+                "pubsub_ordered",
+                "cloud_run_payment",
+                "cloud_sql",
+                "memorystore",
+                "checkout-client-api",
+                "checkout-api-order",
+                "checkout-order-pubsub",
+                "checkout-pubsub-payment",
+                "checkout-order-db",
+                "checkout-order-cache",
+                "global_alb",
+                "cloud_run_europe",
+                "cloud_run_us",
+                "app_europe",
+                "app_us",
+                "cloud_sql_primary",
+                "cloud_sql_replica",
+                "region-alb-europe",
+                "region-alb-us",
+                "region-ingress-app-europe",
+                "region-ingress-app-us",
+                "region-app-sql-europe",
+                "region-app-sql-us",
+                "region-sql-cache-europe",
+                "region-sql-cache-us",
+                "clients",
+                "cloud_run_router",
+                "vertex_stable",
+                "vertex_rc",
+                "pubsub_overflow",
+                "llm-client-api",
+                "llm-api-router",
+                "llm-router-stable",
+                "llm-router-rc",
+                "llm-stable-cache",
+                "llm-rc-overflow"
+              ]
+            },
+            "expectedVersion": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "targetId",
+            "expectedVersion"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": false,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "fail_component",
+      "invocation_id": null,
+      "data": {
+        "name": "fail_component",
+        "description": "Fail a runtime component as a hard outage. Distinct from set_fault_profile dropout, which is packet loss.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "enum": [
+                "web_client",
+                "api_gateway",
+                "cloud_run_order",
+                "pubsub_ordered",
+                "cloud_run_payment",
+                "cloud_sql",
+                "memorystore",
+                "global_alb",
+                "cloud_run_europe",
+                "cloud_run_us",
+                "app_europe",
+                "app_us",
+                "cloud_sql_primary",
+                "cloud_sql_replica",
+                "clients",
+                "cloud_run_router",
+                "vertex_stable",
+                "vertex_rc",
+                "pubsub_overflow"
+              ]
+            },
+            "expectedVersion": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "id",
+            "expectedVersion"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": false,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "fail_region",
+      "invocation_id": null,
+      "data": {
+        "name": "fail_region",
+        "description": "Fail one configured region while keeping its reference topology visible.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "region": {
+              "type": "string",
+              "enum": [
+                "europe-west2",
+                "us-east4"
+              ]
+            },
+            "expectedVersion": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "region",
+            "expectedVersion"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": false,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "fail_zone",
+      "invocation_id": null,
+      "data": {
+        "name": "fail_zone",
+        "description": "Fail one configured availability zone while leaving the topology and surviving replicas visible.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "zone": {
+              "type": "string",
+              "enum": [
+                "europe-west2-a",
+                "europe-west2-b",
+                "us-east4-a",
+                "us-east4-b"
+              ]
+            },
+            "expectedVersion": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "zone",
+            "expectedVersion"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": false,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "get_architecture",
+      "invocation_id": null,
+      "data": {
+        "name": "get_architecture",
+        "description": "Read the current semantic topology, health, failures, exclusions, and store version.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": true,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "get_bench_guide",
+      "invocation_id": null,
+      "data": {
+        "name": "get_bench_guide",
+        "description": "Read the signature human-agent loop, valid remediation paths, pin semantics, and error codes for this bench.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": true,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "get_bench_snapshot",
+      "invocation_id": null,
+      "data": {
+        "name": "get_bench_snapshot",
+        "description": "Atomically read scenario, topology, metrics, constraints, RCA, version, tick, and timestamp from one simulation tick.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": true,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "get_catalogue_guide",
+      "invocation_id": null,
+      "data": {
+        "name": "get_catalogue_guide",
+        "description": "Read how to pick a catalogue simulation and load it onto the live bench.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": true,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "get_constraints",
+      "invocation_id": null,
+      "data": {
+        "name": "get_constraints",
+        "description": "Read applicable provider-limit and model-assumption records with source dates and provenance.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": true,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "get_decision_log",
+      "invocation_id": null,
+      "data": {
+        "name": "get_decision_log",
+        "description": "Read the Flight Data Recorder: recent ui, webmcp, and sim operator events with versions and result codes. Use after STALE_STATE to see why the store version moved. Does not increment storeVersion.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": true,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "get_live_metrics",
+      "invocation_id": null,
+      "data": {
+        "name": "get_live_metrics",
+        "description": "Read demand, served throughput, capacity, utilisation, traffic share, measurement semantics, traffic-weighted fault contributions, and latency-routing scores with intended versus effective split.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": true,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "get_root_cause_analysis",
+      "invocation_id": null,
+      "data": {
+        "name": "get_root_cause_analysis",
+        "description": "Explain the current failure using live topology, fault, capacity, SLO, and Flight Data Recorder evidence. Pass unavailableTargets and prohibitedActions when a recovery path is blocked. Returns recommendedActions plus a ready-to-preview remediationPlan when a compound surviving-path recovery is legal.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "unavailableTargets": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Regions, nodes, or edges that cannot be restored or cleared, such as europe-west2."
+            },
+            "prohibitedActions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Tool names that must not be recommended, such as clear_fault_profile."
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": true,
+          "untrustedContentHint": true
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "get_scenario",
+      "invocation_id": null,
+      "data": {
+        "name": "get_scenario",
+        "description": "Read current human scenario controls, targets, pins, and store version.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": true,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "get_webmcp_status",
+      "invocation_id": null,
+      "data": {
+        "name": "get_webmcp_status",
+        "description": "Read WebMCP capability, toolsReady, session id, and registered tool names. Call this before other tools if discovery looks incomplete.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": true,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "list_architectures",
+      "invocation_id": null,
+      "data": {
+        "name": "list_architectures",
+        "description": "List the three equal GCP reference simulations available to load onto the bench.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": true,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "load_architecture",
+      "invocation_id": null,
+      "data": {
+        "name": "load_architecture",
+        "description": "Load a catalogue simulation onto the live bench. Accepts architecture id (event_driven_checkout, multi_region_saas, llm_inference_serving) or a short name such as checkout, saas, or llm. Navigates to /bench/:id.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Architecture id or short name: checkout, saas, llm, or the full id."
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": false,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "preview_change",
+      "invocation_id": null,
+      "data": {
+        "name": "preview_change",
+        "description": "Read-only projection of a mutation. Does not increment storeVersion. projectionSucceeded is true when the nested op would apply; it is never an applied write.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string"
+            },
+            "args": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "op"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": true,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "ramp_fault_until",
+      "invocation_id": null,
+      "data": {
+        "name": "ramp_fault_until",
+        "description": "Ramp latencyMs or packetLossPercent from start toward ceiling in steps. Records every intermediate result and stops when the stop condition matches. One version bump. Does not require the agent to issue N stale-checked mutations.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "targetId": {
+              "type": "string",
+              "enum": [
+                "web_client",
+                "api_gateway",
+                "cloud_run_order",
+                "pubsub_ordered",
+                "cloud_run_payment",
+                "cloud_sql",
+                "memorystore",
+                "checkout-client-api",
+                "checkout-api-order",
+                "checkout-order-pubsub",
+                "checkout-pubsub-payment",
+                "checkout-order-db",
+                "checkout-order-cache",
+                "global_alb",
+                "cloud_run_europe",
+                "cloud_run_us",
+                "app_europe",
+                "app_us",
+                "cloud_sql_primary",
+                "cloud_sql_replica",
+                "region-alb-europe",
+                "region-alb-us",
+                "region-ingress-app-europe",
+                "region-ingress-app-us",
+                "region-app-sql-europe",
+                "region-app-sql-us",
+                "region-sql-cache-europe",
+                "region-sql-cache-us",
+                "clients",
+                "cloud_run_router",
+                "vertex_stable",
+                "vertex_rc",
+                "pubsub_overflow",
+                "llm-client-api",
+                "llm-api-router",
+                "llm-router-stable",
+                "llm-router-rc",
+                "llm-stable-cache",
+                "llm-rc-overflow"
+              ]
+            },
+            "region": {
+              "type": "string",
+              "description": "Optional region alias. When set, ramps set_region_fault_profile instead of a single target."
+            },
+            "metric": {
+              "type": "string",
+              "enum": [
+                "latencyMs",
+                "packetLossPercent"
+              ]
+            },
+            "start": {
+              "type": "number"
+            },
+            "step": {
+              "type": "number"
+            },
+            "ceiling": {
+              "type": "number"
+            },
+            "stop": {
+              "type": "object",
+              "properties": {
+                "metric": {
+                  "type": "string",
+                  "enum": [
+                    "availability",
+                    "p95Ms",
+                    "errorRate",
+                    "sloStatus",
+                    "effectivePrimaryPercent"
+                  ]
+                },
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "lt",
+                    "lte",
+                    "gt",
+                    "gte",
+                    "eq"
+                  ]
+                },
+                "value": {
+                  "type": [
+                    "number",
+                    "string"
+                  ]
+                }
+              },
+              "required": [
+                "metric",
+                "op",
+                "value"
+              ],
+              "additionalProperties": false
+            },
+            "expectedVersion": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "metric",
+            "start",
+            "step",
+            "ceiling",
+            "stop",
+            "expectedVersion"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": false,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "reset_scenario",
+      "invocation_id": null,
+      "data": {
+        "name": "reset_scenario",
+        "description": "Reset the loaded reference to its operational baseline: tick 0, stress off, no faults or outages, default load and traffic split. Human pins are kept. Updates the visible topology and gauges.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "expectedVersion": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "expectedVersion"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": false,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "restore_component",
+      "invocation_id": null,
+      "data": {
+        "name": "restore_component",
+        "description": "Restore a runtime component that was killed or failed.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "enum": [
+                "web_client",
+                "api_gateway",
+                "cloud_run_order",
+                "pubsub_ordered",
+                "cloud_run_payment",
+                "cloud_sql",
+                "memorystore",
+                "global_alb",
+                "cloud_run_europe",
+                "cloud_run_us",
+                "app_europe",
+                "app_us",
+                "cloud_sql_primary",
+                "cloud_sql_replica",
+                "clients",
+                "cloud_run_router",
+                "vertex_stable",
+                "vertex_rc",
+                "pubsub_overflow"
+              ]
+            },
+            "expectedVersion": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "id",
+            "expectedVersion"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": false,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "restore_region",
+      "invocation_id": null,
+      "data": {
+        "name": "restore_region",
+        "description": "Restore one failed region and its placed services.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "region": {
+              "type": "string",
+              "enum": [
+                "europe-west2",
+                "us-east4"
+              ]
+            },
+            "expectedVersion": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "region",
+            "expectedVersion"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": false,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "restore_zone",
+      "invocation_id": null,
+      "data": {
+        "name": "restore_zone",
+        "description": "Restore one failed availability zone and its placed replicas.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "zone": {
+              "type": "string",
+              "enum": [
+                "europe-west2-a",
+                "europe-west2-b",
+                "us-east4-a",
+                "us-east4-b"
+              ]
+            },
+            "expectedVersion": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "zone",
+            "expectedVersion"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": false,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "run_stress_test",
+      "invocation_id": null,
+      "data": {
+        "name": "run_stress_test",
+        "description": "Start the deterministic stress or failure path for the loaded reference.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "expectedVersion": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "expectedVersion"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": false,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "set_autoscaling",
+      "invocation_id": null,
+      "data": {
+        "name": "set_autoscaling",
+        "description": "Set autoscaling bounds. Replicas follow demand toward the target utilisation within min/max. When a zone is failed, replacement replicas are placed in surviving zones of the same region.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "enum": [
+                "web_client",
+                "api_gateway",
+                "cloud_run_order",
+                "pubsub_ordered",
+                "cloud_run_payment",
+                "cloud_sql",
+                "memorystore",
+                "global_alb",
+                "cloud_run_europe",
+                "cloud_run_us",
+                "app_europe",
+                "app_us",
+                "cloud_sql_primary",
+                "cloud_sql_replica",
+                "clients",
+                "cloud_run_router",
+                "vertex_stable",
+                "vertex_rc",
+                "pubsub_overflow"
+              ]
+            },
+            "min": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "max": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "targetUtilPercent": {
+              "type": "number",
+              "minimum": 10,
+              "maximum": 90
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "expectedVersion": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "id",
+            "min",
+            "max",
+            "expectedVersion"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": false,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "set_batching",
+      "invocation_id": null,
+      "data": {
+        "name": "set_batching",
+        "description": "Configure batching and wait time for Pub/Sub or Vertex AI within the declared model limits.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "enum": [
+                "web_client",
+                "api_gateway",
+                "cloud_run_order",
+                "pubsub_ordered",
+                "cloud_run_payment",
+                "cloud_sql",
+                "memorystore",
+                "global_alb",
+                "cloud_run_europe",
+                "cloud_run_us",
+                "app_europe",
+                "app_us",
+                "cloud_sql_primary",
+                "cloud_sql_replica",
+                "clients",
+                "cloud_run_router",
+                "vertex_stable",
+                "vertex_rc",
+                "pubsub_overflow"
+              ]
+            },
+            "maxBatch": {
+              "type": "number"
+            },
+            "waitMs": {
+              "type": "number"
+            },
+            "expectedVersion": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "id",
+            "maxBatch",
+            "waitMs",
+            "expectedVersion"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": false,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "set_budget",
+      "invocation_id": null,
+      "data": {
+        "name": "set_budget",
+        "description": "Set the monthly budget constraint in GBP for the current scenario.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "budget": {
+              "type": "number"
+            },
+            "expectedVersion": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "budget",
+            "expectedVersion"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": false,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "set_fault_profile",
+      "invocation_id": null,
+      "data": {
+        "name": "set_fault_profile",
+        "description": "Inject deterministic latency (ms) and packet loss (%) at any declared component or connection. packetLossPercent is the unit-explicit name; dropoutPercent is accepted as an alias.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "targetId": {
+              "type": "string",
+              "enum": [
+                "web_client",
+                "api_gateway",
+                "cloud_run_order",
+                "pubsub_ordered",
+                "cloud_run_payment",
+                "cloud_sql",
+                "memorystore",
+                "checkout-client-api",
+                "checkout-api-order",
+                "checkout-order-pubsub",
+                "checkout-pubsub-payment",
+                "checkout-order-db",
+                "checkout-order-cache",
+                "global_alb",
+                "cloud_run_europe",
+                "cloud_run_us",
+                "app_europe",
+                "app_us",
+                "cloud_sql_primary",
+                "cloud_sql_replica",
+                "region-alb-europe",
+                "region-alb-us",
+                "region-ingress-app-europe",
+                "region-ingress-app-us",
+                "region-app-sql-europe",
+                "region-app-sql-us",
+                "region-sql-cache-europe",
+                "region-sql-cache-us",
+                "clients",
+                "cloud_run_router",
+                "vertex_stable",
+                "vertex_rc",
+                "pubsub_overflow",
+                "llm-client-api",
+                "llm-api-router",
+                "llm-router-stable",
+                "llm-router-rc",
+                "llm-stable-cache",
+                "llm-rc-overflow"
+              ]
+            },
+            "latencyMs": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 30000,
+              "description": "Added latency in milliseconds."
+            },
+            "packetLossPercent": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100,
+              "description": "Packet loss as a percent of requests (0-100)."
+            },
+            "dropoutPercent": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100,
+              "description": "Deprecated alias of packetLossPercent."
+            },
+            "expectedVersion": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "targetId",
+            "expectedVersion"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": false,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "set_latency_based_routing",
+      "invocation_id": null,
+      "data": {
+        "name": "set_latency_based_routing",
+        "description": "Enable or disable latency-based routing. Traffic shifts toward the faster healthy region or sheds a slow release candidate.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "expectedVersion": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "enabled",
+            "expectedVersion"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": false,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "set_model_traffic_split",
+      "invocation_id": null,
+      "data": {
+        "name": "set_model_traffic_split",
+        "description": "Set the release-candidate share of model traffic. The healthy default is a 20% canary.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "newModelPercent": {
+              "type": "number"
+            },
+            "expectedVersion": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "newModelPercent",
+            "expectedVersion"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": false,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "set_ordering_key_parallelism",
+      "invocation_id": null,
+      "data": {
+        "name": "set_ordering_key_parallelism",
+        "description": "Set the number of Pub/Sub ordering keys used to spread ordered work while retaining per-key ordering. orderingKeyShards below 1 or unordered=true requests unordered replacement, which keep_pubsub_ordering rejects.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "enum": [
+                "web_client",
+                "api_gateway",
+                "cloud_run_order",
+                "pubsub_ordered",
+                "cloud_run_payment",
+                "cloud_sql",
+                "memorystore",
+                "global_alb",
+                "cloud_run_europe",
+                "cloud_run_us",
+                "app_europe",
+                "app_us",
+                "cloud_sql_primary",
+                "cloud_sql_replica",
+                "clients",
+                "cloud_run_router",
+                "vertex_stable",
+                "vertex_rc",
+                "pubsub_overflow"
+              ]
+            },
+            "orderingKeyShards": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 15
+            },
+            "unordered": {
+              "type": "boolean"
+            },
+            "expectedVersion": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "id",
+            "expectedVersion"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": false,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "set_peak_rps",
+      "invocation_id": null,
+      "data": {
+        "name": "set_peak_rps",
+        "description": "Set peak load demand in requests per second for the current scenario.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "peakRps": {
+              "type": "number"
+            },
+            "expectedVersion": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "peakRps",
+            "expectedVersion"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": false,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "set_region_fault_profile",
+      "invocation_id": null,
+      "data": {
+        "name": "set_region_fault_profile",
+        "description": "Apply the same latency (ms) and packet loss (%) to a regional boundary. Accepts europe-west2 / West2 / us-east4 / east4. On multi-region SaaS this is the ALB ingress edge, not a guessed node id.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "region": {
+              "type": "string",
+              "description": "Region id or alias such as europe-west2, West2, us-east4, east4."
+            },
+            "latencyMs": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 30000,
+              "description": "Added latency in milliseconds."
+            },
+            "packetLossPercent": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100,
+              "description": "Packet loss as a percent of requests (0-100)."
+            },
+            "dropoutPercent": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100,
+              "description": "Deprecated alias of packetLossPercent."
+            },
+            "expectedVersion": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "region",
+            "expectedVersion"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": false,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "set_region_traffic_split",
+      "invocation_id": null,
+      "data": {
+        "name": "set_region_traffic_split",
+        "description": "Set the primary-region traffic allocation.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "primaryPercent": {
+              "type": "number"
+            },
+            "expectedVersion": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "primaryPercent",
+            "expectedVersion"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": false,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 360,
+      "actor": "system",
+      "type": "tool.discovered",
+      "name": "stop_stress_test",
+      "invocation_id": null,
+      "data": {
+        "name": "stop_stress_test",
+        "description": "Stop the running stress test and leave measured failure state. Use reset_scenario to return the visible bench to baseline.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "expectedVersion": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "expectedVersion"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": null,
+        "annotations": {
+          "readOnlyHint": false,
+          "untrustedContentHint": false
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101588
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 956,
+      "actor": "system",
+      "type": "tool.change",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "type": "toolchange",
+        "timestamp": 1789202101615
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 968,
+      "actor": "system",
+      "type": "adapter.reattached",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "tool_count": 37
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 971,
+      "actor": "system",
+      "type": "adapter.reattached",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "tool_count": 37
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 975,
+      "actor": "system",
+      "type": "state.observed",
+      "name": null,
+      "invocation_id": null,
+      "data": {},
+      "state_snapshot": {
+        "ok": true,
+        "code": "OK",
+        "currentVersion": 1,
+        "capturedAt": "2026-09-12T08:35:02.539Z",
+        "simulationTime": "00:00:00",
+        "tick": 0,
+        "storeVersion": 1,
+        "scenario": {
+          "architectureId": "llm_inference_serving",
+          "platform": "GCP",
+          "referenceSpec": "Vertex AI endpoint traffic splits map deployed models to percentages that must total 100; private endpoints do not support traffic splitting.",
+          "referenceUrl": "https://docs.cloud.google.com/vertex-ai/docs/reference/rpc/google.cloud.aiplatform.v1",
+          "peakRps": 180,
+          "budgetGbp": 15200,
+          "availabilityTarget": 0.998,
+          "latencyTargetMs": 900,
+          "pins": [],
+          "activeFaults": {},
+          "running": false,
+          "stressActive": false,
+          "tick": 0,
+          "newModelPercent": 20,
+          "latencyBasedRouting": false,
+          "routing": {
+            "enabled": false,
+            "method": "inverse_latency_weight",
+            "shiftThresholdMs": 50,
+            "hysteresisMs": 25,
+            "intended": {
+              "regionPrimaryPercent": 50,
+              "modelNewPercent": 20
+            },
+            "effective": {
+              "regionPrimaryPercent": 50,
+              "modelNewPercent": 20
+            },
+            "scores": {},
+            "shiftOccurred": false,
+            "noShiftReason": "routing_disabled",
+            "notes": []
+          },
+          "autoscaling": {},
+          "effectiveNewModelPercent": 20,
+          "storeVersion": 1
+        },
+        "topology": {
+          "architectureId": "llm_inference_serving",
+          "platform": "GCP",
+          "referenceSpec": "Vertex AI endpoint traffic splits map deployed models to percentages that must total 100; private endpoints do not support traffic splitting.",
+          "referenceUrl": "https://docs.cloud.google.com/vertex-ai/docs/reference/rpc/google.cloud.aiplatform.v1",
+          "nodes": [
+            {
+              "id": "clients",
+              "name": "Clients",
+              "kind": "client",
+              "region": "europe-west2",
+              "replicaZones": [],
+              "provisionedReplicas": 1,
+              "availableReplicas": 1,
+              "placement": "static_spread",
+              "gcp": {
+                "product": "External clients",
+                "scope": "global",
+                "plane": "edge / ingress"
+              },
+              "fault": null,
+              "health": "healthy",
+              "killed": false
+            },
+            {
+              "id": "api_gateway",
+              "name": "API Gateway",
+              "kind": "gateway",
+              "region": "europe-west2",
+              "replicaZones": [
+                "europe-west2-a",
+                "europe-west2-b"
+              ],
+              "provisionedReplicas": 2,
+              "availableReplicas": 2,
+              "placement": "static_spread",
+              "gcp": {
+                "product": "API Gateway",
+                "scope": "europe-west2 / 2-zone",
+                "plane": "edge / ingress"
+              },
+              "fault": null,
+              "health": "healthy",
+              "killed": false
+            },
+            {
+              "id": "cloud_run_router",
+              "name": "Cloud Run / Model router",
+              "kind": "service",
+              "region": "europe-west2",
+              "replicaZones": [
+                "europe-west2-a",
+                "europe-west2-b"
+              ],
+              "provisionedReplicas": 2,
+              "availableReplicas": 2,
+              "placement": "static_spread",
+              "gcp": {
+                "product": "Cloud Run",
+                "scope": "europe-west2 / 2-zone",
+                "plane": "compute / serving"
+              },
+              "fault": null,
+              "health": "healthy",
+              "killed": false
+            },
+            {
+              "id": "vertex_stable",
+              "name": "Vertex AI endpoint / stable",
+              "kind": "gpu",
+              "region": "europe-west2",
+              "replicaZones": [
+                "europe-west2-a",
+                "europe-west2-b"
+              ],
+              "provisionedReplicas": 2,
+              "availableReplicas": 2,
+              "placement": "static_spread",
+              "gcp": {
+                "product": "Vertex AI Endpoint",
+                "scope": "europe-west2 / 2-zone",
+                "plane": "compute / serving"
+              },
+              "fault": null,
+              "health": "healthy",
+              "killed": false
+            },
+            {
+              "id": "vertex_rc",
+              "name": "Vertex AI endpoint / release candidate",
+              "kind": "gpu",
+              "region": "europe-west2",
+              "replicaZones": [
+                "europe-west2-a",
+                "europe-west2-b",
+                "europe-west2-a"
+              ],
+              "provisionedReplicas": 3,
+              "availableReplicas": 3,
+              "placement": "static_spread",
+              "gcp": {
+                "product": "Vertex AI Endpoint",
+                "scope": "europe-west2 / 2-zone",
+                "plane": "compute / serving"
+              },
+              "fault": null,
+              "health": "healthy",
+              "killed": false
+            },
+            {
+              "id": "memorystore",
+              "name": "Memorystore for Redis / KV cache",
+              "kind": "cache",
+              "region": "europe-west2",
+              "replicaZones": [
+                "europe-west2-a",
+                "europe-west2-b"
+              ],
+              "provisionedReplicas": 2,
+              "availableReplicas": 2,
+              "placement": "static_spread",
+              "gcp": {
+                "product": "Memorystore for Redis",
+                "scope": "europe-west2 / 2-zone",
+                "plane": "state / data"
+              },
+              "fault": null,
+              "health": "healthy",
+              "killed": false
+            },
+            {
+              "id": "pubsub_overflow",
+              "name": "Pub/Sub overflow subscription",
+              "kind": "queue",
+              "region": "europe-west2",
+              "replicaZones": [],
+              "provisionedReplicas": 1,
+              "availableReplicas": 1,
+              "placement": "static_spread",
+              "gcp": {
+                "product": "Pub/Sub",
+                "scope": "europe-west2 / managed regional",
+                "plane": "messaging / delivery"
+              },
+              "fault": null,
+              "health": "healthy",
+              "killed": false
+            }
+          ],
+          "edges": [
+            {
+              "id": "llm-client-api",
+              "from": "clients",
+              "to": "api_gateway",
+              "kind": "sync",
+              "points": "100,300 260,300",
+              "fault": null,
+              "health": "healthy"
+            },
+            {
+              "id": "llm-api-router",
+              "from": "api_gateway",
+              "to": "cloud_run_router",
+              "kind": "sync",
+              "points": "320,300 430,300",
+              "fault": null,
+              "health": "healthy"
+            },
+            {
+              "id": "llm-router-stable",
+              "from": "cloud_run_router",
+              "to": "vertex_stable",
+              "kind": "sync",
+              "points": "490,280 630,185",
+              "fault": null,
+              "health": "healthy"
+            },
+            {
+              "id": "llm-router-rc",
+              "from": "cloud_run_router",
+              "to": "vertex_rc",
+              "kind": "sync",
+              "points": "490,320 630,390",
+              "fault": null,
+              "health": "healthy"
+            },
+            {
+              "id": "llm-stable-cache",
+              "from": "vertex_stable",
+              "to": "memorystore",
+              "kind": "async",
+              "points": "690,185 840,185",
+              "fault": null,
+              "health": "healthy"
+            },
+            {
+              "id": "llm-rc-overflow",
+              "from": "vertex_rc",
+              "to": "pubsub_overflow",
+              "kind": "async",
+              "points": "690,390 840,390",
+              "fault": null,
+              "health": "healthy"
+            }
+          ],
+          "failedRegions": [],
+          "failedZones": [],
+          "killedComponents": [],
+          "excludedRegions": [],
+          "storeVersion": 1
+        },
+        "metrics": {
+          "sim": {
+            "tick": 0,
+            "availability": 1,
+            "p95Ms": 260,
+            "errorRate": 0,
+            "rpsAchieved": 180,
+            "costGbpMonth": 5435,
+            "sloPass": false,
+            "sloStatus": "not_tested",
+            "breachReasons": []
+          },
+          "nodeMetrics": {
+            "clients": {
+              "demandRps": 180,
+              "servedRps": 180,
+              "baseServedRps": 180,
+              "capacity": 1000,
+              "utilisation": 0.18,
+              "trafficShare": 1,
+              "effectiveHealth": "healthy",
+              "provisionedReplicas": 1,
+              "availableReplicas": 1,
+              "replicaZones": [],
+              "injectedLatencyMs": 0,
+              "dropoutPercent": 0,
+              "dropoutRps": 0,
+              "headroom": 820,
+              "packetLossPercent": 0
+            },
+            "api_gateway": {
+              "demandRps": 180,
+              "servedRps": 180,
+              "baseServedRps": 180,
+              "capacity": 440,
+              "utilisation": 0.4090909090909091,
+              "trafficShare": 1,
+              "effectiveHealth": "healthy",
+              "provisionedReplicas": 2,
+              "availableReplicas": 2,
+              "replicaZones": [
+                "europe-west2-a",
+                "europe-west2-b"
+              ],
+              "injectedLatencyMs": 0,
+              "dropoutPercent": 0,
+              "dropoutRps": 0,
+              "headroom": 260,
+              "packetLossPercent": 0
+            },
+            "cloud_run_router": {
+              "demandRps": 180,
+              "servedRps": 180,
+              "baseServedRps": 180,
+              "capacity": 440,
+              "utilisation": 0.4090909090909091,
+              "trafficShare": 1,
+              "effectiveHealth": "healthy",
+              "provisionedReplicas": 2,
+              "availableReplicas": 2,
+              "replicaZones": [
+                "europe-west2-a",
+                "europe-west2-b"
+              ],
+              "injectedLatencyMs": 0,
+              "dropoutPercent": 0,
+              "dropoutRps": 0,
+              "headroom": 260,
+              "packetLossPercent": 0
+            },
+            "vertex_stable": {
+              "demandRps": 144,
+              "servedRps": 144,
+              "baseServedRps": 144,
+              "capacity": 239.99999999999997,
+              "utilisation": 0.6000000000000001,
+              "trafficShare": 0.8,
+              "ttftMs": 350,
+              "effectiveHealth": "healthy",
+              "provisionedReplicas": 2,
+              "availableReplicas": 2,
+              "replicaZones": [
+                "europe-west2-a",
+                "europe-west2-b"
+              ],
+              "injectedLatencyMs": 0,
+              "dropoutPercent": 0,
+              "dropoutRps": 0,
+              "capacityModel": {
+                "concurrency": 6,
+                "serviceTimeMs": 45,
+                "schedulingEfficiency": 0.9,
+                "batchGain": 1,
+                "reserveRps": 23.999999999999996
+              },
+              "headroom": 95.99999999999997,
+              "packetLossPercent": 0
+            },
+            "vertex_rc": {
+              "demandRps": 36,
+              "servedRps": 36,
+              "baseServedRps": 36,
+              "capacity": 240,
+              "utilisation": 0.15,
+              "trafficShare": 0.2,
+              "ttftMs": 350,
+              "effectiveHealth": "healthy",
+              "provisionedReplicas": 3,
+              "availableReplicas": 3,
+              "replicaZones": [
+                "europe-west2-a",
+                "europe-west2-b",
+                "europe-west2-a"
+              ],
+              "injectedLatencyMs": 0,
+              "dropoutPercent": 0,
+              "dropoutRps": 0,
+              "capacityModel": {
+                "concurrency": 4,
+                "serviceTimeMs": 45,
+                "schedulingEfficiency": 0.9,
+                "batchGain": 1,
+                "reserveRps": 24
+              },
+              "headroom": 204,
+              "packetLossPercent": 0
+            },
+            "memorystore": {
+              "demandRps": 144,
+              "servedRps": 144,
+              "baseServedRps": 144,
+              "capacity": 700,
+              "utilisation": 0.2057142857142857,
+              "trafficShare": 0.8,
+              "effectiveHealth": "healthy",
+              "provisionedReplicas": 2,
+              "availableReplicas": 2,
+              "replicaZones": [
+                "europe-west2-a",
+                "europe-west2-b"
+              ],
+              "injectedLatencyMs": 0,
+              "dropoutPercent": 0,
+              "dropoutRps": 0,
+              "headroom": 556,
+              "packetLossPercent": 0
+            },
+            "pubsub_overflow": {
+              "demandRps": 0,
+              "servedRps": 0,
+              "baseServedRps": 0,
+              "capacity": 1000,
+              "utilisation": 0,
+              "trafficShare": 0,
+              "effectiveHealth": "healthy",
+              "provisionedReplicas": 1,
+              "availableReplicas": 1,
+              "replicaZones": [],
+              "injectedLatencyMs": 0,
+              "dropoutPercent": 0,
+              "dropoutRps": 0,
+              "headroom": 1000,
+              "packetLossPercent": 0
+            }
+          },
+          "edgeMetrics": {
+            "llm-client-api": {
+              "rps": 180,
+              "droppedRps": 0,
+              "health": "healthy",
+              "injectedLatencyMs": 0,
+              "dropoutPercent": 0
+            },
+            "llm-api-router": {
+              "rps": 180,
+              "droppedRps": 0,
+              "health": "healthy",
+              "injectedLatencyMs": 0,
+              "dropoutPercent": 0
+            },
+            "llm-router-stable": {
+              "rps": 144,
+              "droppedRps": 0,
+              "health": "healthy",
+              "injectedLatencyMs": 0,
+              "dropoutPercent": 0
+            },
+            "llm-router-rc": {
+              "rps": 36,
+              "droppedRps": 0,
+              "health": "healthy",
+              "injectedLatencyMs": 0,
+              "dropoutPercent": 0
+            },
+            "llm-stable-cache": {
+              "rps": 144,
+              "droppedRps": 0,
+              "health": "healthy",
+              "injectedLatencyMs": 0,
+              "dropoutPercent": 0
+            },
+            "llm-rc-overflow": {
+              "rps": 0,
+              "droppedRps": 0,
+              "health": "healthy",
+              "injectedLatencyMs": 0,
+              "dropoutPercent": 0
+            }
+          },
+          "observations": [],
+          "measurement": {
+            "clock": "deterministic_sim",
+            "tickHz": 2,
+            "sample": "projected",
+            "latencyAggregation": "traffic_weighted",
+            "availabilityAggregation": "traffic_weighted",
+            "utilisation": "instantaneous_demand_over_capacity",
+            "notes": [
+              "Node demand, served throughput, and utilisation are instantaneous samples on the current simulation tick.",
+              "System latency and availability apply injected faults in proportion to the traffic share of the affected path.",
+              "When the bench is not under stress, flow values are the projected routing assignment at the configured peak load.",
+              "There is no rolling window: each tick replaces the previous sample."
+            ]
+          },
+          "routing": {
+            "enabled": false,
+            "method": "inverse_latency_weight",
+            "shiftThresholdMs": 50,
+            "hysteresisMs": 25,
+            "intended": {
+              "regionPrimaryPercent": 50,
+              "modelNewPercent": 20
+            },
+            "effective": {
+              "regionPrimaryPercent": 50,
+              "modelNewPercent": 20
+            },
+            "scores": {},
+            "shiftOccurred": false,
+            "noShiftReason": "routing_disabled",
+            "notes": []
+          },
+          "faultContributions": [],
+          "faultAccountingNote": "Fault contributions describe the current routing assignment. System gauges apply them only while stress is active.",
+          "storeVersion": 1
+        },
+        "constraints": {
+          "provider": "GCP",
+          "constraints": [
+            {
+              "id": "vertex-ai-traffic-split",
+              "sourceType": "provider_behavior",
+              "metric": "Endpoint traffic split",
+              "value": 100,
+              "unit": "% total",
+              "sourceDate": "2026-08-27",
+              "sourceUrl": "https://docs.cloud.google.com/vertex-ai/docs/reference/rpc/google.cloud.aiplatform.v1",
+              "notes": "Deployed-model percentages must add up to 100."
+            },
+            {
+              "id": "api-gateway-payload-size",
+              "sourceType": "provider_limit",
+              "metric": "API Gateway request / response size",
+              "value": 32,
+              "unit": "MB",
+              "sourceDate": "2026-08-27",
+              "sourceUrl": "https://docs.cloud.google.com/api-gateway/docs/quotas",
+              "notes": "Streaming is not supported through API Gateway."
+            },
+            {
+              "id": "vertex-ai-stable-capacity",
+              "sourceType": "model_assumption",
+              "metric": "Vertex AI stable endpoint capacity",
+              "value": 120,
+              "unit": "inference/s/replica",
+              "sourceDate": "2026-08-27",
+              "notes": "Synthetic serving capacity; verify against the selected model and machine type."
+            },
+            {
+              "id": "vertex-ai-release-capacity",
+              "sourceType": "model_assumption",
+              "metric": "Vertex AI release endpoint capacity",
+              "value": 80,
+              "unit": "inference/s/replica",
+              "sourceDate": "2026-08-27",
+              "notes": "Synthetic serving capacity; verify against the selected model and machine type."
+            }
+          ],
+          "publicListPriceEstimate": {
+            "gbpMonth": 5435,
+            "sourceDate": "2026-08-27",
+            "assumptions": [
+              "Curated estimate",
+              "Synthetic replica mix"
+            ]
+          },
+          "storeVersion": 1
+        },
+        "rca": {
+          "status": "healthy",
+          "summary": "No active failure or fault evidence is present; no root cause identified.",
+          "primaryCause": null,
+          "contributingCauses": [],
+          "causalChain": [],
+          "evidence": [],
+          "recommendedActions": [],
+          "remediationPlan": null,
+          "impact": {
+            "availability": 1,
+            "latencyMs": 260,
+            "errorRate": 0,
+            "achievedRps": 180,
+            "sloPass": false,
+            "sloStatus": "not_tested",
+            "breachReasons": []
+          },
+          "tick": 0,
+          "storeVersion": 1
+        }
+      }
+    },
+    {
+      "timestamp_ms": 975,
+      "actor": "agent_a",
+      "type": "tool.invoke",
+      "name": "set_fault_profile",
+      "invocation_id": "5df967b8-759e-4e16-8936-34ee7e088733",
+      "data": {
+        "args": {
+          "targetId": "vertex_rc",
+          "latencyMs": 1500,
+          "packetLossPercent": 0,
+          "expectedVersion": 1
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 976,
+      "actor": "system",
+      "type": "state.observed",
+      "name": null,
+      "invocation_id": null,
+      "data": {},
+      "state_snapshot": {
+        "ok": true,
+        "code": "OK",
+        "currentVersion": 1,
+        "capturedAt": "2026-09-12T08:35:02.540Z",
+        "simulationTime": "00:00:00",
+        "tick": 0,
+        "storeVersion": 1,
+        "scenario": {
+          "architectureId": "llm_inference_serving",
+          "platform": "GCP",
+          "referenceSpec": "Vertex AI endpoint traffic splits map deployed models to percentages that must total 100; private endpoints do not support traffic splitting.",
+          "referenceUrl": "https://docs.cloud.google.com/vertex-ai/docs/reference/rpc/google.cloud.aiplatform.v1",
+          "peakRps": 180,
+          "budgetGbp": 15200,
+          "availabilityTarget": 0.998,
+          "latencyTargetMs": 900,
+          "pins": [],
+          "activeFaults": {},
+          "running": false,
+          "stressActive": false,
+          "tick": 0,
+          "newModelPercent": 20,
+          "latencyBasedRouting": false,
+          "routing": {
+            "enabled": false,
+            "method": "inverse_latency_weight",
+            "shiftThresholdMs": 50,
+            "hysteresisMs": 25,
+            "intended": {
+              "regionPrimaryPercent": 50,
+              "modelNewPercent": 20
+            },
+            "effective": {
+              "regionPrimaryPercent": 50,
+              "modelNewPercent": 20
+            },
+            "scores": {},
+            "shiftOccurred": false,
+            "noShiftReason": "routing_disabled",
+            "notes": []
+          },
+          "autoscaling": {},
+          "effectiveNewModelPercent": 20,
+          "storeVersion": 1
+        },
+        "topology": {
+          "architectureId": "llm_inference_serving",
+          "platform": "GCP",
+          "referenceSpec": "Vertex AI endpoint traffic splits map deployed models to percentages that must total 100; private endpoints do not support traffic splitting.",
+          "referenceUrl": "https://docs.cloud.google.com/vertex-ai/docs/reference/rpc/google.cloud.aiplatform.v1",
+          "nodes": [
+            {
+              "id": "clients",
+              "name": "Clients",
+              "kind": "client",
+              "region": "europe-west2",
+              "replicaZones": [],
+              "provisionedReplicas": 1,
+              "availableReplicas": 1,
+              "placement": "static_spread",
+              "gcp": {
+                "product": "External clients",
+                "scope": "global",
+                "plane": "edge / ingress"
+              },
+              "fault": null,
+              "health": "healthy",
+              "killed": false
+            },
+            {
+              "id": "api_gateway",
+              "name": "API Gateway",
+              "kind": "gateway",
+              "region": "europe-west2",
+              "replicaZones": [
+                "europe-west2-a",
+                "europe-west2-b"
+              ],
+              "provisionedReplicas": 2,
+              "availableReplicas": 2,
+              "placement": "static_spread",
+              "gcp": {
+                "product": "API Gateway",
+                "scope": "europe-west2 / 2-zone",
+                "plane": "edge / ingress"
+              },
+              "fault": null,
+              "health": "healthy",
+              "killed": false
+            },
+            {
+              "id": "cloud_run_router",
+              "name": "Cloud Run / Model router",
+              "kind": "service",
+              "region": "europe-west2",
+              "replicaZones": [
+                "europe-west2-a",
+                "europe-west2-b"
+              ],
+              "provisionedReplicas": 2,
+              "availableReplicas": 2,
+              "placement": "static_spread",
+              "gcp": {
+                "product": "Cloud Run",
+                "scope": "europe-west2 / 2-zone",
+                "plane": "compute / serving"
+              },
+              "fault": null,
+              "health": "healthy",
+              "killed": false
+            },
+            {
+              "id": "vertex_stable",
+              "name": "Vertex AI endpoint / stable",
+              "kind": "gpu",
+              "region": "europe-west2",
+              "replicaZones": [
+                "europe-west2-a",
+                "europe-west2-b"
+              ],
+              "provisionedReplicas": 2,
+              "availableReplicas": 2,
+              "placement": "static_spread",
+              "gcp": {
+                "product": "Vertex AI Endpoint",
+                "scope": "europe-west2 / 2-zone",
+                "plane": "compute / serving"
+              },
+              "fault": null,
+              "health": "healthy",
+              "killed": false
+            },
+            {
+              "id": "vertex_rc",
+              "name": "Vertex AI endpoint / release candidate",
+              "kind": "gpu",
+              "region": "europe-west2",
+              "replicaZones": [
+                "europe-west2-a",
+                "europe-west2-b",
+                "europe-west2-a"
+              ],
+              "provisionedReplicas": 3,
+              "availableReplicas": 3,
+              "placement": "static_spread",
+              "gcp": {
+                "product": "Vertex AI Endpoint",
+                "scope": "europe-west2 / 2-zone",
+                "plane": "compute / serving"
+              },
+              "fault": null,
+              "health": "healthy",
+              "killed": false
+            },
+            {
+              "id": "memorystore",
+              "name": "Memorystore for Redis / KV cache",
+              "kind": "cache",
+              "region": "europe-west2",
+              "replicaZones": [
+                "europe-west2-a",
+                "europe-west2-b"
+              ],
+              "provisionedReplicas": 2,
+              "availableReplicas": 2,
+              "placement": "static_spread",
+              "gcp": {
+                "product": "Memorystore for Redis",
+                "scope": "europe-west2 / 2-zone",
+                "plane": "state / data"
+              },
+              "fault": null,
+              "health": "healthy",
+              "killed": false
+            },
+            {
+              "id": "pubsub_overflow",
+              "name": "Pub/Sub overflow subscription",
+              "kind": "queue",
+              "region": "europe-west2",
+              "replicaZones": [],
+              "provisionedReplicas": 1,
+              "availableReplicas": 1,
+              "placement": "static_spread",
+              "gcp": {
+                "product": "Pub/Sub",
+                "scope": "europe-west2 / managed regional",
+                "plane": "messaging / delivery"
+              },
+              "fault": null,
+              "health": "healthy",
+              "killed": false
+            }
+          ],
+          "edges": [
+            {
+              "id": "llm-client-api",
+              "from": "clients",
+              "to": "api_gateway",
+              "kind": "sync",
+              "points": "100,300 260,300",
+              "fault": null,
+              "health": "healthy"
+            },
+            {
+              "id": "llm-api-router",
+              "from": "api_gateway",
+              "to": "cloud_run_router",
+              "kind": "sync",
+              "points": "320,300 430,300",
+              "fault": null,
+              "health": "healthy"
+            },
+            {
+              "id": "llm-router-stable",
+              "from": "cloud_run_router",
+              "to": "vertex_stable",
+              "kind": "sync",
+              "points": "490,280 630,185",
+              "fault": null,
+              "health": "healthy"
+            },
+            {
+              "id": "llm-router-rc",
+              "from": "cloud_run_router",
+              "to": "vertex_rc",
+              "kind": "sync",
+              "points": "490,320 630,390",
+              "fault": null,
+              "health": "healthy"
+            },
+            {
+              "id": "llm-stable-cache",
+              "from": "vertex_stable",
+              "to": "memorystore",
+              "kind": "async",
+              "points": "690,185 840,185",
+              "fault": null,
+              "health": "healthy"
+            },
+            {
+              "id": "llm-rc-overflow",
+              "from": "vertex_rc",
+              "to": "pubsub_overflow",
+              "kind": "async",
+              "points": "690,390 840,390",
+              "fault": null,
+              "health": "healthy"
+            }
+          ],
+          "failedRegions": [],
+          "failedZones": [],
+          "killedComponents": [],
+          "excludedRegions": [],
+          "storeVersion": 1
+        },
+        "metrics": {
+          "sim": {
+            "tick": 0,
+            "availability": 1,
+            "p95Ms": 260,
+            "errorRate": 0,
+            "rpsAchieved": 180,
+            "costGbpMonth": 5435,
+            "sloPass": false,
+            "sloStatus": "not_tested",
+            "breachReasons": []
+          },
+          "nodeMetrics": {
+            "clients": {
+              "demandRps": 180,
+              "servedRps": 180,
+              "baseServedRps": 180,
+              "capacity": 1000,
+              "utilisation": 0.18,
+              "trafficShare": 1,
+              "effectiveHealth": "healthy",
+              "provisionedReplicas": 1,
+              "availableReplicas": 1,
+              "replicaZones": [],
+              "injectedLatencyMs": 0,
+              "dropoutPercent": 0,
+              "dropoutRps": 0,
+              "headroom": 820,
+              "packetLossPercent": 0
+            },
+            "api_gateway": {
+              "demandRps": 180,
+              "servedRps": 180,
+              "baseServedRps": 180,
+              "capacity": 440,
+              "utilisation": 0.4090909090909091,
+              "trafficShare": 1,
+              "effectiveHealth": "healthy",
+              "provisionedReplicas": 2,
+              "availableReplicas": 2,
+              "replicaZones": [
+                "europe-west2-a",
+                "europe-west2-b"
+              ],
+              "injectedLatencyMs": 0,
+              "dropoutPercent": 0,
+              "dropoutRps": 0,
+              "headroom": 260,
+              "packetLossPercent": 0
+            },
+            "cloud_run_router": {
+              "demandRps": 180,
+              "servedRps": 180,
+              "baseServedRps": 180,
+              "capacity": 440,
+              "utilisation": 0.4090909090909091,
+              "trafficShare": 1,
+              "effectiveHealth": "healthy",
+              "provisionedReplicas": 2,
+              "availableReplicas": 2,
+              "replicaZones": [
+                "europe-west2-a",
+                "europe-west2-b"
+              ],
+              "injectedLatencyMs": 0,
+              "dropoutPercent": 0,
+              "dropoutRps": 0,
+              "headroom": 260,
+              "packetLossPercent": 0
+            },
+            "vertex_stable": {
+              "demandRps": 144,
+              "servedRps": 144,
+              "baseServedRps": 144,
+              "capacity": 239.99999999999997,
+              "utilisation": 0.6000000000000001,
+              "trafficShare": 0.8,
+              "ttftMs": 350,
+              "effectiveHealth": "healthy",
+              "provisionedReplicas": 2,
+              "availableReplicas": 2,
+              "replicaZones": [
+                "europe-west2-a",
+                "europe-west2-b"
+              ],
+              "injectedLatencyMs": 0,
+              "dropoutPercent": 0,
+              "dropoutRps": 0,
+              "capacityModel": {
+                "concurrency": 6,
+                "serviceTimeMs": 45,
+                "schedulingEfficiency": 0.9,
+                "batchGain": 1,
+                "reserveRps": 23.999999999999996
+              },
+              "headroom": 95.99999999999997,
+              "packetLossPercent": 0
+            },
+            "vertex_rc": {
+              "demandRps": 36,
+              "servedRps": 36,
+              "baseServedRps": 36,
+              "capacity": 240,
+              "utilisation": 0.15,
+              "trafficShare": 0.2,
+              "ttftMs": 350,
+              "effectiveHealth": "healthy",
+              "provisionedReplicas": 3,
+              "availableReplicas": 3,
+              "replicaZones": [
+                "europe-west2-a",
+                "europe-west2-b",
+                "europe-west2-a"
+              ],
+              "injectedLatencyMs": 0,
+              "dropoutPercent": 0,
+              "dropoutRps": 0,
+              "capacityModel": {
+                "concurrency": 4,
+                "serviceTimeMs": 45,
+                "schedulingEfficiency": 0.9,
+                "batchGain": 1,
+                "reserveRps": 24
+              },
+              "headroom": 204,
+              "packetLossPercent": 0
+            },
+            "memorystore": {
+              "demandRps": 144,
+              "servedRps": 144,
+              "baseServedRps": 144,
+              "capacity": 700,
+              "utilisation": 0.2057142857142857,
+              "trafficShare": 0.8,
+              "effectiveHealth": "healthy",
+              "provisionedReplicas": 2,
+              "availableReplicas": 2,
+              "replicaZones": [
+                "europe-west2-a",
+                "europe-west2-b"
+              ],
+              "injectedLatencyMs": 0,
+              "dropoutPercent": 0,
+              "dropoutRps": 0,
+              "headroom": 556,
+              "packetLossPercent": 0
+            },
+            "pubsub_overflow": {
+              "demandRps": 0,
+              "servedRps": 0,
+              "baseServedRps": 0,
+              "capacity": 1000,
+              "utilisation": 0,
+              "trafficShare": 0,
+              "effectiveHealth": "healthy",
+              "provisionedReplicas": 1,
+              "availableReplicas": 1,
+              "replicaZones": [],
+              "injectedLatencyMs": 0,
+              "dropoutPercent": 0,
+              "dropoutRps": 0,
+              "headroom": 1000,
+              "packetLossPercent": 0
+            }
+          },
+          "edgeMetrics": {
+            "llm-client-api": {
+              "rps": 180,
+              "droppedRps": 0,
+              "health": "healthy",
+              "injectedLatencyMs": 0,
+              "dropoutPercent": 0
+            },
+            "llm-api-router": {
+              "rps": 180,
+              "droppedRps": 0,
+              "health": "healthy",
+              "injectedLatencyMs": 0,
+              "dropoutPercent": 0
+            },
+            "llm-router-stable": {
+              "rps": 144,
+              "droppedRps": 0,
+              "health": "healthy",
+              "injectedLatencyMs": 0,
+              "dropoutPercent": 0
+            },
+            "llm-router-rc": {
+              "rps": 36,
+              "droppedRps": 0,
+              "health": "healthy",
+              "injectedLatencyMs": 0,
+              "dropoutPercent": 0
+            },
+            "llm-stable-cache": {
+              "rps": 144,
+              "droppedRps": 0,
+              "health": "healthy",
+              "injectedLatencyMs": 0,
+              "dropoutPercent": 0
+            },
+            "llm-rc-overflow": {
+              "rps": 0,
+              "droppedRps": 0,
+              "health": "healthy",
+              "injectedLatencyMs": 0,
+              "dropoutPercent": 0
+            }
+          },
+          "observations": [],
+          "measurement": {
+            "clock": "deterministic_sim",
+            "tickHz": 2,
+            "sample": "projected",
+            "latencyAggregation": "traffic_weighted",
+            "availabilityAggregation": "traffic_weighted",
+            "utilisation": "instantaneous_demand_over_capacity",
+            "notes": [
+              "Node demand, served throughput, and utilisation are instantaneous samples on the current simulation tick.",
+              "System latency and availability apply injected faults in proportion to the traffic share of the affected path.",
+              "When the bench is not under stress, flow values are the projected routing assignment at the configured peak load.",
+              "There is no rolling window: each tick replaces the previous sample."
+            ]
+          },
+          "routing": {
+            "enabled": false,
+            "method": "inverse_latency_weight",
+            "shiftThresholdMs": 50,
+            "hysteresisMs": 25,
+            "intended": {
+              "regionPrimaryPercent": 50,
+              "modelNewPercent": 20
+            },
+            "effective": {
+              "regionPrimaryPercent": 50,
+              "modelNewPercent": 20
+            },
+            "scores": {},
+            "shiftOccurred": false,
+            "noShiftReason": "routing_disabled",
+            "notes": []
+          },
+          "faultContributions": [],
+          "faultAccountingNote": "Fault contributions describe the current routing assignment. System gauges apply them only while stress is active.",
+          "storeVersion": 1
+        },
+        "constraints": {
+          "provider": "GCP",
+          "constraints": [
+            {
+              "id": "vertex-ai-traffic-split",
+              "sourceType": "provider_behavior",
+              "metric": "Endpoint traffic split",
+              "value": 100,
+              "unit": "% total",
+              "sourceDate": "2026-08-27",
+              "sourceUrl": "https://docs.cloud.google.com/vertex-ai/docs/reference/rpc/google.cloud.aiplatform.v1",
+              "notes": "Deployed-model percentages must add up to 100."
+            },
+            {
+              "id": "api-gateway-payload-size",
+              "sourceType": "provider_limit",
+              "metric": "API Gateway request / response size",
+              "value": 32,
+              "unit": "MB",
+              "sourceDate": "2026-08-27",
+              "sourceUrl": "https://docs.cloud.google.com/api-gateway/docs/quotas",
+              "notes": "Streaming is not supported through API Gateway."
+            },
+            {
+              "id": "vertex-ai-stable-capacity",
+              "sourceType": "model_assumption",
+              "metric": "Vertex AI stable endpoint capacity",
+              "value": 120,
+              "unit": "inference/s/replica",
+              "sourceDate": "2026-08-27",
+              "notes": "Synthetic serving capacity; verify against the selected model and machine type."
+            },
+            {
+              "id": "vertex-ai-release-capacity",
+              "sourceType": "model_assumption",
+              "metric": "Vertex AI release endpoint capacity",
+              "value": 80,
+              "unit": "inference/s/replica",
+              "sourceDate": "2026-08-27",
+              "notes": "Synthetic serving capacity; verify against the selected model and machine type."
+            }
+          ],
+          "publicListPriceEstimate": {
+            "gbpMonth": 5435,
+            "sourceDate": "2026-08-27",
+            "assumptions": [
+              "Curated estimate",
+              "Synthetic replica mix"
+            ]
+          },
+          "storeVersion": 1
+        },
+        "rca": {
+          "status": "healthy",
+          "summary": "No active failure or fault evidence is present; no root cause identified.",
+          "primaryCause": null,
+          "contributingCauses": [],
+          "causalChain": [],
+          "evidence": [],
+          "recommendedActions": [],
+          "remediationPlan": null,
+          "impact": {
+            "availability": 1,
+            "latencyMs": 260,
+            "errorRate": 0,
+            "achievedRps": 180,
+            "sloPass": false,
+            "sloStatus": "not_tested",
+            "breachReasons": []
+          },
+          "tick": 0,
+          "storeVersion": 1
+        }
+      }
+    },
+    {
+      "timestamp_ms": 976,
+      "actor": "agent_b",
+      "type": "tool.invoke",
+      "name": "set_fault_profile",
+      "invocation_id": "83c86c2f-cc8e-4dd7-8e19-0c99dd05473d",
+      "data": {
+        "args": {
+          "targetId": "vertex_rc",
+          "latencyMs": 1500,
+          "packetLossPercent": 0,
+          "expectedVersion": 1
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 979,
+      "actor": "agent_a",
+      "type": "tool.result",
+      "name": "set_fault_profile",
+      "invocation_id": "5df967b8-759e-4e16-8936-34ee7e088733",
+      "data": {
+        "result": {
+          "ok": true,
+          "code": "OK",
+          "currentVersion": 2,
+          "before": {
+            "availability": 1,
+            "p95Ms": 260,
+            "errorRate": 0,
+            "rpsAchieved": 180,
+            "costGbpMonth": 5435,
+            "sloPass": false,
+            "sloStatus": "not_tested"
+          },
+          "after": {
+            "availability": 1,
+            "p95Ms": 650,
+            "errorRate": 0,
+            "rpsAchieved": 180,
+            "costGbpMonth": 5435,
+            "sloPass": true,
+            "sloStatus": "passing"
+          },
+          "effective": {
+            "sloStatus": "passing",
+            "sloPass": true,
+            "intendedTraffic": {
+              "regionPrimaryPercent": 50,
+              "modelNewPercent": 20
+            },
+            "effectiveTraffic": {
+              "regionPrimaryPercent": 50,
+              "modelNewPercent": 20
+            },
+            "routing": {
+              "enabled": false,
+              "method": "inverse_latency_weight",
+              "shiftThresholdMs": 50,
+              "hysteresisMs": 25,
+              "intended": {
+                "regionPrimaryPercent": 50,
+                "modelNewPercent": 20
+              },
+              "effective": {
+                "regionPrimaryPercent": 50,
+                "modelNewPercent": 20
+              },
+              "scores": {},
+              "shiftOccurred": false,
+              "noShiftReason": "routing_disabled",
+              "notes": []
+            },
+            "capacityPressure": []
+          },
+          "targetId": "vertex_rc",
+          "latencyMs": 1500,
+          "packetLossPercent": 0,
+          "dropoutPercent": 0
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 982,
+      "actor": "agent_b",
+      "type": "tool.result",
+      "name": "set_fault_profile",
+      "invocation_id": "83c86c2f-cc8e-4dd7-8e19-0c99dd05473d",
+      "data": {
+        "result": {
+          "ok": false,
+          "code": "STALE_STATE",
+          "expectedVersion": 1,
+          "currentVersion": 2,
+          "read": [
+            "get_decision_log",
+            "get_bench_snapshot"
+          ],
+          "message": "Human or simulation moved the store. Re-read get_decision_log then retry with the new expectedVersion."
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 982,
+      "actor": "system",
+      "type": "result_invariant.pass",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "expression": "results.set_fault_profile.OK == 1",
+        "results": {
+          "set_fault_profile": {
+            "OK": 1,
+            "STALE_STATE": 1
+          }
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 982,
+      "actor": "system",
+      "type": "result_invariant.pass",
+      "name": null,
+      "invocation_id": null,
+      "data": {
+        "expression": "results.set_fault_profile.STALE_STATE == 1",
+        "results": {
+          "set_fault_profile": {
+            "OK": 1,
+            "STALE_STATE": 1
+          }
+        }
+      },
+      "state_snapshot": {}
+    },
+    {
+      "timestamp_ms": 982,
+      "actor": "system",
+      "type": "scenario.end",
+      "name": null,
+      "invocation_id": null,
+      "data": {},
+      "state_snapshot": {}
+    }
+  ]
+}
