@@ -140,7 +140,34 @@ The CLI is complete on its own. The optional terminal console is a scenario comp
 
 # Inspect a run, compare it with a baseline, or replay it.
 .venv/bin/webmcp console .webmcp/runs/<run-id>/bundle.json --compare baseline.json
+
+# Browse saved runs, pin a baseline with `b`, inspect traces with `t`, replay
+# with `r`, compare with `c`, view repro metadata with `m`, export with `h`.
+.venv/bin/webmcp console --history
+
+# Export redacted incident metadata (never screenshots or sensitive contents).
+.venv/bin/webmcp handoff .webmcp/runs/<run-id>/bundle.json --json
 ```
+
+The console has two modes: the scenario composer and the run-history/flight
+deck. Composer actions are ordinary YAML for multiple actors, timed
+`invoke`/`retry`/`cancel`/`click`/`fill`/`select`/`navigate`/`wait` actions,
+executable faults, state invariants, and result invariants. Discovery supplies
+tool schemas and read-only state tools; CommandAPI validation runs before a
+file is saved. Composer accepts either actors JSON or ordered actions JSON, not
+both, and emits every accepted action. The flight deck is keyboard-first: trace view uses `q` to quit,
+`home`/`end` to navigate, `r` to replay, `c` to compare, `m` for safe repro,
+and `h` for safe handoff export. History view adds `b` to pin a baseline and
+`t` to render its redacted chronological timeline. The event list is
+actor-labelled and chronological; `--print` provides the compact
+non-interactive equivalent.
+
+The console never creates a runner. Its injected command module calls the same
+CommandAPI used by CLI, Python, and local MCP control. Only the CLI constructs
+it with `--replay-allow-mutations`; the TUI cannot escalate policy. A replay
+that returns a valid failing bundle is reported as **Failure reproduced** even
+when the CLI exit status is 1; malformed output or contract rejection is a
+replay execution/contract failure.
 
 Coding agents can use the local MCP JSON-RPC server without scraping terminal prose:
 

@@ -338,6 +338,39 @@ def load_scenario(path: Path) -> Scenario:
         raise CommandError(f"invalid scenario {path}: {error}") from error
 
 
+def _validate_discovered_arguments(action: Any, descriptor: dict[str, Any]) -> None:
+    """Validate the portable action arguments against discovered JSON schema."""
+    schema = descriptor.get("inputSchema")
+    if not isinstance(schema, dict):
+        return
+    arguments = action.args or {}
+    if not isinstance(arguments, dict):
+        raise CommandError(f"arguments for {action.invoke or action.retry!r} must be an object")
+    properties = schema.get("properties", {})
+    required = schema.get("required", [])
+    if isinstance(required, list):
+        missing = [key for key in required if key not in arguments]
+        if missing:
+            raise CommandError(f"missing required arguments for {action.invoke or action.retry!r}: {missing}")
+    if isinstance(properties, dict) and schema.get("additionalProperties") is False:
+        unknown = sorted(set(arguments) - set(properties))
+        if unknown:
+            raise CommandError(f"unknown arguments for {action.invoke or action.retry!r}: {unknown}")
+    for key, value in arguments.items():
+        expected = properties.get(key, {}).get("type") if isinstance(properties.get(key), dict) else None
+        valid = {
+            "object": isinstance(value, dict),
+            "array": isinstance(value, list),
+            "string": isinstance(value, str),
+            "integer": isinstance(value, int) and not isinstance(value, bool),
+            "number": isinstance(value, (int, float)) and not isinstance(value, bool),
+            "boolean": isinstance(value, bool),
+            "null": value is None,
+        }.get(expected, True)
+        if not valid:
+            raise CommandError(f"argument {key!r} for {action.invoke or action.retry!r} must be {expected}")
+
+
 def redacted(value: Any) -> Any:
     return redact_recursive(value)
 
@@ -494,11 +527,12 @@ class CommandAPI:
         return bundle
 
     def validate(self, path: Path | None = None, *, scenario: Scenario | dict[str, Any] | None = None,
-                 run_id: str | None = None) -> RunBundle:
+                 run_id: str | None = None,
+                 tool_inventory: list[dict[str, Any]] | None = None) -> RunBundle:
         if (path is None) == (scenario is None):
             raise CommandError("provide exactly one scenario path or in-memory scenario")
         scenario = load_scenario(path) if path is not None else (scenario if isinstance(scenario, Scenario) else Scenario.model_validate(scenario))
-        self._validate_scenario_semantics(scenario)
+        self._validate_scenario_semantics(scenario, tool_inventory)
         _validate_state_requirements(self.config, scenario)
         bundle = RunBundle.for_scenario("validate", scenario, run_id=run_id)
         bundle.state_observation = build_state_observation(self.config, scenario)
@@ -511,6 +545,7 @@ class CommandAPI:
         bundle.compatibility = Compatibility(groups=bundle.requirements)
         bundle.actions = [dict(actor=actor, **action.model_dump(mode="json")) for actor, actions in scenario.actors.items() for action in actions]
         bundle.faults = [fault.model_dump(mode="json") for fault in scenario.faults]
+        bundle.tool_inventory = redacted(tool_inventory or [])
         bundle.result = {"passed": True, "summary": "scenario is valid", "source": str(path) if path else "in_memory", "contract_version": bundle.schema_version, "engine_version": bundle.compatibility.engine_version}
         return bundle
 
@@ -542,6 +577,12 @@ class CommandAPI:
             missing = referenced - known
             if missing:
                 raise CommandError(f"scenario references unavailable tools: {sorted(missing)}")
+            descriptors = {tool.get("name"): tool for tool in tool_inventory if isinstance(tool, dict)}
+            for actions in scenario.actors.values():
+                for action in actions:
+                    name = action.invoke or action.retry
+                    if name and name in descriptors:
+                        _validate_discovered_arguments(action, descriptors[name])
             if scenario.state:
                 state_tool = next((tool for tool in tool_inventory if tool.get("name") == scenario.state.tool), None)
                 if state_tool is None:
@@ -646,6 +687,62 @@ class CommandAPI:
         contents = json.dumps(redacted({"run_id": record.run_id, "result": record.result, "events": [event.model_dump(mode="json") for event in events]}), indent=2, default=str)
         destination.write_text("<html><body><h1>WebMCP Resilience report</h1><pre>" + html.escape(contents) + "</pre></body></html>")
         return {"schema_version": "1.0", "contract_version": "1.0", "engine_version": record.engine_version, "run_id": record.run_id, "output": str(destination), "passed": record.result.get("passed")}
+
+    def export_handoff(self, bundle_path: Path, output: Path | None = None) -> dict[str, Path]:
+        """Export safe incident metadata without reading sensitive artifacts."""
+        record = RunBundle.model_validate(redacted(json.loads(bundle_path.read_text())))
+        handoff = record.result.get("failure_handoff")
+        if not isinstance(handoff, dict):
+            handoff = failure_handoff(record, bundle_path)
+        safe_artifacts = [
+            {
+                "kind": artifact.kind,
+                "sensitivity": artifact.sensitivity,
+                "redacted": artifact.redacted,
+                "description": artifact.description,
+                "available": artifact.kind in {"failure", "scenario"} and artifact.redacted and artifact.sensitivity == "redacted",
+            }
+            for artifact in record.artifacts
+        ]
+        summary = redacted({
+            "run_id": record.run_id,
+            "scenario": (record.scenario or {}).get("name"),
+            "failed_invariant": handoff.get("failed_invariant"),
+            "observed_state": handoff.get("observed_state", {}),
+            "minimal_repro": [item for item in safe_artifacts if item["kind"] in {"failure", "scenario"}],
+            "selected_schedule": record.execution.get("schedule"),
+            "policy": {
+                "approvals": [approval.model_dump(mode="json") for approval in record.approvals],
+                "agent_policy": record.agent_policy,
+            },
+            "capability_fingerprint": record.compatibility.capability_fingerprint,
+            "artifacts": safe_artifacts,
+            "replay_command": record.replay_command,
+        })
+        target = (output or self._safe_output(record.run_id, "incident")).resolve()
+        # An explicit output path is caller-managed; generated paths remain in
+        # the framework output root and never contain imported evidence.
+        target.parent.mkdir(parents=True, exist_ok=True)
+        json_path = target if target.suffix == ".json" else target.with_suffix(".json")
+        md_path = target.with_suffix(".md")
+        json_path.write_text(json.dumps(summary, indent=2, sort_keys=True, default=str))
+        lines = [
+            f"# WebMCP resilience incident · {summary['run_id']}", "",
+            f"- Scenario: {summary.get('scenario') or 'unknown'}",
+            f"- Failed invariant: {summary.get('failed_invariant') or 'unknown'}",
+            f"- Capability fingerprint: {summary.get('capability_fingerprint') or 'unknown'}",
+            f"- Bundle: {bundle_path}",
+            f"- Replay: `{' '.join(summary.get('replay_command') or [])}`",
+            "", "## Observed state", "", "```json",
+            json.dumps(summary.get("observed_state", {}), indent=2, sort_keys=True),
+            "```", "", "## Selected schedule", "", "```json",
+            json.dumps(summary.get("selected_schedule"), indent=2, sort_keys=True, default=str),
+            "```", "", "## Safe artifact metadata", "", "```json",
+            json.dumps(summary.get("artifacts", []), indent=2, sort_keys=True), "```", "",
+            "Sensitive artifact contents (screenshots, network payloads, and other potentially sensitive files) are intentionally omitted.",
+        ]
+        md_path.write_text("\n".join(lines) + "\n")
+        return {"json": json_path, "markdown": md_path}
 
     async def run(self, scenario_path: Path | None = None, *, scenario: Scenario | dict[str, Any] | None = None, run_id: str | None = None, headless: bool = True,
                   allow_mutations: bool = False, adversarial: bool = False, seed: int = 0,
@@ -853,15 +950,87 @@ class CommandAPI:
 
 
 def diff_bundles(left: RunBundle, right: RunBundle) -> dict[str, Any]:
-    """Stable structural comparison for CI and the console baseline lane."""
+    """Stable semantic comparison for CI and the console baseline lane."""
     left_events = [(event.actor, event.type, event.name) for event in (left.trace.events if left.trace else [])]
     right_events = [(event.actor, event.type, event.name) for event in (right.trace.events if right.trace else [])]
     browser_left = {"browser": left.compatibility.browser, "version": left.compatibility.browser_version,
                     "headless": left.compatibility.headless, "fingerprint": left.compatibility.capability_fingerprint}
     browser_right = {"browser": right.compatibility.browser, "version": right.compatibility.browser_version,
                      "headless": right.compatibility.headless, "fingerprint": right.compatibility.capability_fingerprint}
+    def result_codes(bundle: RunBundle) -> list[str]:
+        return [
+            str((event.data.get("result") or {}).get("code"))
+            for event in (bundle.trace.events if bundle.trace else [])
+            if event.type == "tool.result" and isinstance(event.data.get("result"), dict) and "code" in event.data["result"]
+        ]
+
+    def invariant_outcome(bundle: RunBundle) -> dict[str, Any]:
+        failures = [
+            {"type": event.type, "expression": event.data.get("expression"), "state": redacted(event.state_snapshot)}
+            for event in (bundle.trace.events if bundle.trace else [])
+            if event.type in {"invariant.fail", "result_invariant.fail"}
+        ]
+        return {"passed": bundle.result.get("passed"), "failures": failures}
+
+    def state_observations(bundle: RunBundle) -> list[dict[str, Any]]:
+        observations = [redacted(event.state_snapshot) for event in (bundle.trace.events if bundle.trace else []) if event.state_snapshot]
+        deltas: list[dict[str, Any]] = []
+        previous: dict[str, Any] = {}
+        for current in observations:
+            added = {key: current[key] for key in sorted(set(current) - set(previous))}
+            removed = {key: previous[key] for key in sorted(set(previous) - set(current))}
+            changed = {key: {"before": previous[key], "after": current[key]} for key in sorted(set(previous) & set(current)) if previous[key] != current[key]}
+            deltas.append({"added": added, "removed": removed, "changed": changed})
+            previous = current
+        return deltas
+
+    def schedule(bundle: RunBundle) -> Any:
+        scheduler = bundle.execution.get("scheduler")
+        return scheduler.get("selected_logical_schedule") if isinstance(scheduler, dict) else bundle.execution.get("schedule")
+
+    def artifact_metadata(bundle: RunBundle) -> list[dict[str, Any]]:
+        return sorted([{"kind": item.kind, "redacted": item.redacted, "sensitivity": item.sensitivity, "description": item.description} for item in bundle.artifacts], key=lambda item: (item["kind"], str(item["description"])))
+
+    compatibility_left = {
+        "requirements": left.requirements.model_dump(mode="json"),
+        "browser": browser_left,
+        "approval_policy": left.execution.get("approval_policy", [item.model_dump(mode="json") for item in left.approvals]),
+    }
+    compatibility_right = {
+        "requirements": right.requirements.model_dump(mode="json"),
+        "browser": browser_right,
+        "approval_policy": right.execution.get("approval_policy", [item.model_dump(mode="json") for item in right.approvals]),
+    }
+    behaviour_left = {
+        "invariant_outcome": invariant_outcome(left),
+        "observed_state_deltas": state_observations(left),
+        "schedule_order": schedule(left),
+        "faults": redacted(left.faults),
+        "tool_result_codes": result_codes(left),
+        "artifacts": artifact_metadata(left),
+    }
+    behaviour_right = {
+        "invariant_outcome": invariant_outcome(right),
+        "observed_state_deltas": state_observations(right),
+        "schedule_order": schedule(right),
+        "faults": redacted(right.faults),
+        "tool_result_codes": result_codes(right),
+        "artifacts": artifact_metadata(right),
+    }
+    compatibility_changes = {
+        key: {"left": compatibility_left[key], "right": compatibility_right[key]}
+        for key in compatibility_left if compatibility_left[key] != compatibility_right[key]
+    }
+    behavioural_changes = {
+        key: {"left": behaviour_left[key], "right": behaviour_right[key]}
+        for key in behaviour_left if behaviour_left[key] != behaviour_right[key]
+    }
     return {"schema_version": "1.0", "contract_version": "1.0", "engine_version": left.engine_version, "left": left.run_id, "right": right.run_id,
             "result_changed": left.result.get("passed") != right.result.get("passed"),
             "browser_changed": browser_left != browser_right, "browser_left": browser_left, "browser_right": browser_right,
             "events_only_left": [item for item in left_events if item not in right_events],
-            "events_only_right": [item for item in right_events if item not in left_events]}
+            "events_only_right": [item for item in right_events if item not in left_events],
+            "compatibility_drift": {"changed": bool(compatibility_changes), "changes": compatibility_changes},
+            "behavioural_drift": {"changed": bool(behavioural_changes), "changes": behavioural_changes},
+            "semantic": {"left": {"compatibility": compatibility_left, "behaviour": behaviour_left}, "right": {"compatibility": compatibility_right, "behaviour": behaviour_right}},
+            }

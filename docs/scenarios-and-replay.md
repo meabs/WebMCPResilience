@@ -106,3 +106,31 @@ observations, policy approvals, artifacts, result, and replay command.
 Textual structured evidence and URL credentials are recursively redacted.
 Screenshots are marked potentially sensitive and remain metadata-only through
 the console and agent-control interfaces.
+
+## Console workbench
+
+`webmcp console --discovery .webmcp/runs/<preflight-id>/bundle.json` opens the
+scenario composer. It emits ordinary portable YAML and equivalent CLI/MCP
+requests. A composer save validates through `CommandAPI` first. Multiple actors
+and ordered timed actions support `invoke`, `retry`, `cancel`, `click`,
+`fill`, `select`, `navigate`, and `wait`; executable fault declarations support
+the timing matrix above. Provide either the actors JSON object or the ordered
+actions JSON list; supplying both is rejected so no accepted action can be
+silently discarded. There is no metadata-only fault control.
+
+`webmcp console --history` opens the read-only run-history workspace. History
+keys are `b` pin baseline, `t` render the redacted timeline, `r` replay, `c`
+compare, `m` show safe minimized-repro metadata, and `h` export a safe
+handoff. Trace view also supports `q`, `home`, `end`, `r`, `c`, `m`, and `h`.
+The timeline is an actor-labelled chronological event list with nested state
+diffs; it does not provide per-actor lane or event/tool filter views. The same
+compact chronological view is available as
+`webmcp console <bundle> --print` for CI logs.
+
+Replay classification is based on the fresh JSON bundle/result: an expected
+invariant failure reproduced by replay is successful replay work and is shown
+as “Failure reproduced”, even though the CLI process exits 1 for the failing
+invariant. A malformed result or incompatible bundle is an execution/contract
+failure. `webmcp handoff <bundle>` writes redacted Markdown and JSON incident
+metadata; screenshots, network payloads, and other potentially sensitive
+artifact contents are never embedded.

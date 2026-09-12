@@ -26,8 +26,9 @@ All three entry points share the same safety policy:
 
 - CLI commands go through `CommandAPI` and require explicit
   `--allow-mutations` for the vulnerable fixture.
-- The terminal console is view-only unless launched with its explicit replay
-  mutation flag.
+- The terminal console is read-only by default; only the CLI may construct its
+  replay command module with the explicit replay mutation flag. The TUI itself
+  cannot escalate authority.
 - Local MCP control receives immutable startup authority; a request cannot
   escalate it. Sensitive artifacts remain metadata-only and textual evidence
   is redacted.

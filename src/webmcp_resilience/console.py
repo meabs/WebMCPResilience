@@ -5,7 +5,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .models.bundle import RunBundle, redact_recursive
-from .console_client import bundle_comparison, bundle_trace, visible_events
+from .console_client import bundle_comparison, bundle_trace, timeline_rows, visible_events
 
 
 def show_trace(path: Path, console: Console, compare: Path | None = None) -> None:
@@ -47,6 +47,12 @@ def show_trace(path: Path, console: Console, compare: Path | None = None) -> Non
             console.print(f"[cyan]trace comparison[/cyan] · events +{len(current_events - baseline_events)}/-{len(baseline_events - current_events)}")
     console.print(f"[cyan]{discovered} tools discovered[/cyan] · [dim]{lifecycle} lifecycle events collapsed[/dim] · "
                   f"[dim]visible events={len(visible_events(trace))}[/dim]")
+    if bundle is not None:
+        approvals = bundle.approvals
+        authority = approvals[-1].authority if approvals else "read_only"
+        console.print(f"[dim]run={bundle.run_id} · result={'PASS' if bundle.result.get('passed') else 'FAIL'} · "
+                      f"seed={bundle.execution.get('seed')} · capability={bundle.compatibility.capability_fingerprint or 'unknown'} · "
+                      f"authority={authority} · sensitive artifacts=metadata-only[/dim]")
     if baseline is not None:
         console.print(f"[dim]safe redacted artifacts={safe_artifacts} · metadata-only artifacts={metadata_only}[/dim]")
     table = Table(title=f"WebMCP Console · {trace['scenario']}")
@@ -63,3 +69,9 @@ def show_trace(path: Path, console: Console, compare: Path | None = None) -> Non
             detail = f"{detail} · {result['code']}"
         table.add_row(f"+{event['timestamp_ms']}ms", event['actor'], event['type'], detail)
     console.print(table)
+    failures = [event for event in timeline_rows(trace) if event["failure"]]
+    if failures:
+        console.print("[red]Failure links[/red]")
+        for row in failures:
+            console.print(f"  {row['event_type']} · {row['event'].get('data', {}).get('expression', 'unknown')} · "
+                          f"state={json.dumps(row['event'].get('state_snapshot', {}), sort_keys=True)}")

@@ -5,7 +5,7 @@ import pytest
 
 from webmcp_resilience.commands import CommandAPI, CommandError, diff_bundles
 from webmcp_resilience.config import Config
-from webmcp_resilience.models.bundle import Compatibility, CompatibilityRequirements, RunBundle
+from webmcp_resilience.models.bundle import Artifact, Compatibility, CompatibilityRequirements, RunBundle
 from webmcp_resilience.models.trace import TraceEvent, TraceRun
 
 
@@ -30,6 +30,14 @@ def test_bundle_diff_compares_trace_independently_of_frontend() -> None:
     left = RunBundle(command="run", result={"passed": True})
     right = RunBundle(command="run", result={"passed": False})
     assert diff_bundles(left, right)["result_changed"] is True
+
+
+def test_bundle_diff_separates_compatibility_and_behavioural_drift() -> None:
+    left = RunBundle(command="run", run_id="left", result={"passed": True}, execution={"schedule": [], "approval_policy": []})
+    right = RunBundle(command="run", run_id="right", result={"passed": False}, execution={"schedule": [{"actor": "a"}], "approval_policy": []})
+    diff = diff_bundles(left, right)
+    assert diff["behavioural_drift"]["changed"] is True
+    assert diff["compatibility_drift"]["changed"] is False
 
 
 def test_persistence_recursively_redacts_evidence(tmp_path: Path) -> None:
@@ -128,6 +136,27 @@ def test_report_escapes_tool_result_markup(tmp_path: Path) -> None:
     assert result["passed"] is None
     assert "<script>" not in report.read_text()
     assert "&lt;script&gt;" in report.read_text()
+
+
+def test_command_api_validates_discovered_arguments_and_exports_safe_handoff(tmp_path: Path) -> None:
+    api = CommandAPI(Config(), output_dir=tmp_path / "runs")
+    scenario = {"name": "schema", "actors": {"agent": [{"invoke": "read", "args": {}}]}}
+    discovery = [{"name": "read", "inputSchema": {"type": "object", "required": ["query"], "properties": {"query": {"type": "string"}}}}]
+    with pytest.raises(CommandError, match="missing required"):
+        api.validate(scenario=scenario, tool_inventory=discovery)
+
+    trace = TraceRun(scenario="incident")
+    trace.events.append(TraceEvent(timestamp_ms=1, actor="system", type="invariant.fail", data={"expression": "count <= 0"}, state_snapshot={"count": 1}))
+    screenshot = tmp_path / "secret.png"
+    screenshot.write_bytes(b"private screenshot")
+    bundle = RunBundle(command="run", run_id="incident", trace=trace, result={"passed": False}, artifacts=[
+        Artifact(kind="screenshot", path=str(screenshot)),
+    ])
+    bundle_path = bundle.write(tmp_path / "incident.json")
+    outputs = api.export_handoff(bundle_path)
+    assert "count <= 0" in outputs["markdown"].read_text()
+    assert "private screenshot" not in outputs["markdown"].read_text()
+    assert "screenshot" in outputs["json"].read_text()
 
 
 @pytest.mark.parametrize("group", ["fault_model", "invariant_model", "trace_model"])

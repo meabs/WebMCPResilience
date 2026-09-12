@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from webmcp_resilience.cli import _emit, app
@@ -15,6 +16,24 @@ def test_demo_race_is_a_registered_cli_contract() -> None:
     assert result.exit_code == 0
     assert "Resilience Forge" in result.output
     assert "--json" in result.output
+
+
+@pytest.mark.parametrize(("flag", "expected"), [(None, False), ("--replay-allow-mutations", True)])
+def test_history_receives_cli_configured_replay_authority(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: str | None, expected: bool
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_history(path: Path, command_module: object) -> None:
+        captured["path"] = path
+        captured["module"] = command_module
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("webmcp_resilience.cli.run_history", fake_history)
+    args = ["console", "--history"] + ([flag] if flag else [])
+    result = CliRunner().invoke(app, args)
+    assert result.exit_code == 0, result.output
+    assert captured["module"].replay_allow_mutations is expected  # type: ignore[attr-defined]
 
 
 def test_failed_bundle_json_contains_one_structured_handoff_document(tmp_path: Path, capsys) -> None:

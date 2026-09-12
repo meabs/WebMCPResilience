@@ -14,7 +14,8 @@ from .models.bundle import ENGINE_VERSION, RunBundle
 from .trace.otel import export_otel
 from .trace.viewer import render_html
 from .console import show_trace
-from .tui import run_composer, run_console
+from .console_commands import ConsoleCommandModule
+from .tui import run_composer, run_console, run_history
 from .agent_control import AgentPolicy, LocalMCPControlAdapter, serve_stdio
 
 app = typer.Typer(help="Portable resilience evidence for WebMCP applications.", pretty_exceptions_enable=False)
@@ -136,6 +137,16 @@ def report(bundle: Path, output: Path | None = typer.Option(None, "--output"), j
     except Exception as error: _command_error(error, json_output)
 
 
+@app.command("handoff")
+def handoff(bundle: Path, output: Path | None = typer.Option(None, "--output"), json_output: bool = typer.Option(False, "--json")) -> None:
+    """Export redacted Markdown/JSON incident metadata without evidence contents."""
+    try:
+        outputs = _api(Path(".webmcp/runs")).export_handoff(bundle, output)
+        payload = {"schema_version": "1.0", "contract_version": "1.0", "outputs": {key: str(value) for key, value in outputs.items()}}
+        print(json.dumps(payload, sort_keys=True)) if json_output else console.print(f"Markdown: {outputs['markdown']}\nJSON: {outputs['json']}")
+    except Exception as error: _command_error(error, json_output)
+
+
 @app.command()
 def demo(host: str = "127.0.0.1", port: int = 4173) -> None: serve(host, port)
 
@@ -230,10 +241,17 @@ def trace(trace_file: Path, html_output: Path | None = typer.Option(None, "--htm
 
 
 @app.command("console")
-def console_ui(trace_file: Path | None = typer.Argument(None), print_view: bool = typer.Option(False, "--print"), replay_allow_mutations: bool = typer.Option(False, "--replay-allow-mutations"), compare: Path | None = typer.Option(None, "--compare"), discovery: Path | None = typer.Option(None, "--discovery", help="Portable preflight bundle whose schemas drive the editor")) -> None:
-    if trace_file is None: run_composer(discovery)
+def console_ui(trace_file: Path | None = typer.Argument(None), print_view: bool = typer.Option(False, "--print"), replay_allow_mutations: bool = typer.Option(False, "--replay-allow-mutations"), compare: Path | None = typer.Option(None, "--compare"), discovery: Path | None = typer.Option(None, "--discovery", help="Portable preflight bundle whose schemas drive the editor"), history: bool = typer.Option(False, "--history", help="Browse saved portable run bundles")) -> None:
+    if history:
+        # Keep history replay on the same CLI-owned authority path as bundle
+        # replay. The TUI receives the configured module; it cannot escalate.
+        run_history(Path(".webmcp/runs"), ConsoleCommandModule(_api(Path(".webmcp/runs")), replay_allow_mutations=replay_allow_mutations))
+    elif trace_file is None: run_composer(discovery)
     elif print_view: show_trace(trace_file, console, compare)
-    else: run_console(trace_file, replay_allow_mutations, compare)
+    else:
+        # The CLI is the authority boundary.  The TUI receives an already
+        # configured command module and cannot escalate its own permission.
+        run_console(trace_file, ConsoleCommandModule(_api(Path(".webmcp/runs")), replay_allow_mutations=replay_allow_mutations), compare)
 
 
 if __name__ == "__main__": app()

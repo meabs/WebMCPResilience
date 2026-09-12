@@ -14,8 +14,10 @@ from webmcp_resilience.agent_control import AgentPolicy, LocalMCPControlAdapter
 from webmcp_resilience.cli import app
 from webmcp_resilience.commands import CommandAPI
 from webmcp_resilience.config import Config
+from webmcp_resilience.console_commands import ConsoleCommandModule
 from webmcp_resilience.demo import create_server
 from webmcp_resilience.models.bundle import redact_recursive
+from webmcp_resilience.tui import TraceConsole
 
 
 pytestmark = pytest.mark.e2e
@@ -178,3 +180,40 @@ def test_local_mcp_control_executes_the_same_loop_and_policy(
     }))
     assert replayed["result"]["passed"] is False
     assert replayed["bundle"]["execution"]["schedule"] == executed["bundle"]["execution"]["schedule"]
+
+
+async def _wait_for_console_detail(app: TraceConsole, pilot: object, needle: str) -> str:
+    # Textual workers run in a background thread; bounded polling keeps this
+    # browser-backed assertion deterministic without sleeping in production.
+    for _ in range(100):
+        await pilot.pause(0.1)  # type: ignore[attr-defined]
+        detail = str(app.query_one("#detail").render())
+        if needle in detail:
+            return detail
+    return str(app.query_one("#detail").render())
+
+
+async def test_browser_backed_console_replays_intentionally_failing_bundle(
+    tmp_path: Path, lab_server: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The interactive console reports a reproduced invariant failure."""
+    monkeypatch.chdir(tmp_path)
+    scenario = scenario_path(tmp_path)
+    webmcp = tmp_path / ".webmcp"
+    webmcp.mkdir(exist_ok=True)
+    (webmcp / "config.yaml").write_text(
+        f"base_url: {lab_server}\nbrowser: chromium\nbrowser_args: []\n"
+        "state_script: window.__resilienceLab.getState()\n"
+    )
+    config = Config(base_url=lab_server, state_script="window.__resilienceLab.getState()")
+    api = CommandAPI(config, output_dir=tmp_path / ".webmcp" / "runs")
+    failed = await api.run(scenario, headless=True, allow_mutations=True, adversarial=True, seed=7, run_id="console-failure")
+    assert failed.result["passed"] is False
+    failure_path = api.save(failed)
+    command_module = ConsoleCommandModule(api, replay_allow_mutations=True)
+    app = TraceConsole(failure_path, command_module=command_module)
+    async with app.run_test() as pilot:
+        app.run_replay()
+        detail = await _wait_for_console_detail(app, pilot, "Failure reproduced")
+    assert "claims.active <= claims.capacity" in detail
+    assert "Observed state" in detail
