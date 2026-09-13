@@ -38,7 +38,7 @@ WEBMCP_COMPATIBILITY_REPORT_VERSION = "1.0"
 
 def _browser_version(client: BrowserClient) -> str:
     """Return Playwright's browser version without making it a required API."""
-    version = getattr(client.browser, "version", None)
+    version = getattr(getattr(client, "browser", None), "version", None)
     return str(version() if callable(version) else version or "unknown")
 
 
@@ -932,7 +932,7 @@ class CommandAPI:
             actual_schedule = schedule or [(action.offset_ms, actor, action) for actor, actions in scenario.actors.items() for action in actions]
             # A new browser context for each schedule prevents state bleed between exploration variants.
             async with BrowserClient(self.config.browser, headless=headless, args=self.config.browser_args, channel=self.config.browser_channel) as client:
-                assert client.page and client.browser
+                assert client.page
                 await client.page.goto(initial_url)
                 readiness = WebMCPAdapter(client.page, self.config.state_script, self.config.from_origins)
                 await readiness.install()
