@@ -86,7 +86,12 @@ function fallbackModelContext() {
 
 const nativeWebMCP = Boolean(document.modelContext);
 const host = document.modelContext ?? fallbackModelContext();
-if (!nativeWebMCP) document.modelContext = host;
+if (!nativeWebMCP) {
+  // This marker lets preflight distinguish the lab's deliberately lightweight
+  // compatibility host from Chromium's native document.modelContext.
+  Object.defineProperty(host, '__webmcpResilienceCompatibilityHost', { value: true });
+  document.modelContext = host;
+}
 const tools = [
   { name: 'create_record', description: 'Create a session record with user-provided text.', inputSchema: { type: 'object', properties: { text: { type: 'string', minLength: 1 } }, required: ['text'] }, execute: createRecord },
   { name: 'complete_next_record', description: 'Complete the oldest open session record.', inputSchema: { type: 'object', properties: {} }, execute: completeNext },

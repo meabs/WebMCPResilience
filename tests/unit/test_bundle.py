@@ -116,6 +116,28 @@ def test_command_api_replay_preserves_recorded_adversarial_schedule(tmp_path: Pa
     assert replay_config.state_script == "window.__resilienceLab.getState()"
 
 
+@pytest.mark.parametrize("mode", ["none", "scenario_state_tool"])
+def test_replay_does_not_inherit_a_local_state_script_when_bundle_recorded_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    source = replay_contract()
+    source.state_observation = StateObservation(mode=mode)
+    path = source.write(tmp_path / f"{mode}.json")
+    captured: dict[str, object] = {}
+
+    async def fake_run(self: CommandAPI, scenario_path: Path | None, **kwargs: object) -> RunBundle:
+        captured["config"] = self.config
+        return RunBundle(command="run", scenario=source.scenario, result={"passed": True})
+
+    monkeypatch.setattr(CommandAPI, "run", fake_run)
+    __import__("asyncio").run(
+        CommandAPI(Config(state_script="window.__localApp.getState()")).replay(path)
+    )
+    replay_config = captured["config"]
+    assert isinstance(replay_config, Config)
+    assert replay_config.state_script is None
+
+
 def test_replay_prefers_versioned_selected_logical_schedule(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     source = replay_contract()
     source.execution["scheduler"] = {

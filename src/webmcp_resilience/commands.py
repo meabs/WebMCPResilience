@@ -44,10 +44,14 @@ def _browser_version(client: BrowserClient) -> str:
 
 def _recorded_replay_config(config: Config, saved: RunBundle) -> Config:
     """Restore a bundle's explicit state boundary and target origin for replay."""
-    updates: dict[str, str] = {}
+    updates: dict[str, str | None] = {}
     observation = saved.state_observation
     if observation.mode == "state_script" and observation.configured_source:
         updates["state_script"] = observation.configured_source
+    else:
+        # A replay must preserve an explicit lack of a state script rather than
+        # inheriting a different boundary from the local project config.
+        updates["state_script"] = None
 
     recorded_url = saved.browser_environment.get("url")
     if isinstance(recorded_url, str):

@@ -68,8 +68,8 @@
     },
     probe() {
       const host = context();
-      const nativeHost = Boolean(navigator.modelContext);
-      const documentHost = Boolean(document.modelContext);
+      const compatibilityHost = Boolean(host?.__webmcpResilienceCompatibilityHost);
+      const nativeHost = Boolean(host) && !compatibilityHost;
       const topOrigin = (() => { try { return window.top?.location?.origin || null; } catch (_) { return null; } })();
       const frames = Array.from(document.querySelectorAll('iframe')).map((frame, index) => ({
         index, src: frame.src || null, sandbox: frame.getAttribute('sandbox'), allow: frame.getAttribute('allow'),
@@ -87,9 +87,9 @@
       return {
         api: {
           available: Boolean(host), location: document.modelContext ? 'document.modelContext' : navigator.modelContext ? 'navigator.modelContext' : null,
-          mode: nativeHost ? 'native' : documentHost ? 'compatibility_host' : 'unavailable',
+          mode: nativeHost ? 'native' : compatibilityHost ? 'compatibility_host' : 'unavailable',
           native: nativeHost,
-          compatibilityHost: !nativeHost && documentHost,
+          compatibilityHost,
           getTools: typeof host?.getTools === 'function', executeTool: typeof host?.executeTool === 'function', toolchange: typeof host?.addEventListener === 'function',
           cancellation: typeof AbortController === 'function', declarativeOrImperative: tools === null ? 'unavailable' : 'unknown-until-inventory'
         },

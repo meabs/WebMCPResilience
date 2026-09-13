@@ -47,8 +47,8 @@ python3 -m venv .venv
 ```text
 Failed invariant: claims.active <= claims.capacity
 Observed state: {"claims": {"active": 2, "capacity": 1}}
-bundle    .webmcp/runs/demo-race-failure/bundle.json
-replay    webmcp replay .webmcp/runs/demo-race-failure/bundle.json --json
+Bundle: .webmcp/runs/demo-race-failure/bundle.json
+Replay: webmcp replay .webmcp/runs/demo-race-failure/bundle.json --run-id demo-race-failure --allow-mutations
 ```
 
 See the [fixture source and scenario](examples/resilience-forge) for the full
