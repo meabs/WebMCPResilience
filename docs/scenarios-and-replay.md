@@ -122,6 +122,11 @@ or guess new arguments.
 .venv/bin/webmcp replay .webmcp/runs/<run-id>/bundle.json --ci --json
 ```
 
+Replay restores a recorded `state_script` and the origin captured in the
+bundle, so a copied bundle does not require a hand-written local
+`.webmcp/config.yaml` for its observable-state boundary. It still executes
+against a live application at that origin; start the application before replay.
+
 Replay rejects incompatible artifacts, including a changed browser capability
 fingerprint or canonical live tool-inventory fingerprint. A tool mismatch is a
 structured `tool_contract_drift` error containing only redacted added, removed,

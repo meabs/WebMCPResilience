@@ -9,6 +9,7 @@ from collections import Counter
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, Iterable
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -33,6 +34,32 @@ from .tool_contracts import (
 
 
 WEBMCP_COMPATIBILITY_REPORT_VERSION = "1.0"
+
+
+def _browser_version(client: BrowserClient) -> str:
+    """Return Playwright's browser version without making it a required API."""
+    version = getattr(getattr(client, "browser", None), "version", None)
+    return str(version() if callable(version) else version or "unknown")
+
+
+def _recorded_replay_config(config: Config, saved: RunBundle) -> Config:
+    """Restore a bundle's explicit state boundary and target origin for replay."""
+    updates: dict[str, str | None] = {}
+    observation = saved.state_observation
+    if observation.mode == "state_script" and observation.configured_source:
+        updates["state_script"] = observation.configured_source
+    else:
+        # A replay must preserve an explicit lack of a state script rather than
+        # inheriting a different boundary from the local project config.
+        updates["state_script"] = None
+
+    recorded_url = saved.browser_environment.get("url")
+    if isinstance(recorded_url, str):
+        parsed = urlsplit(recorded_url)
+        if parsed.scheme in {"http", "https"} and parsed.netloc:
+            updates["base_url"] = f"{parsed.scheme}://{parsed.netloc}"
+
+    return config.model_copy(update=updates)
 
 
 def _finding(identifier: str, severity: str, recommendation: str, source: str, value: Any, *, title: str | None = None) -> dict[str, Any]:
@@ -216,14 +243,14 @@ def build_webmcp_compatibility_report(
     elif permissions.get("modelContextAllowed") is False:
         findings.append(_finding(
             "permissions-policy-denied", "error",
-            "Allow model-context for this origin in the response Permissions-Policy and iframe allow attributes.",
-            "permissionsPolicy.modelContextAllowed", permissions.get("modelContextAllowed"), title="Permissions Policy denies model context",
+            "Allow tools for this origin in the response Permissions-Policy and iframe allow attributes.",
+            "permissionsPolicy.modelContextAllowed", permissions.get("modelContextAllowed"), title="Permissions Policy denies tools",
         ))
     elif permissions.get("modelContextAllowed") is None:
         findings.append(_finding(
             "permissions-policy-unverified", "warning",
-            "Verify model-context delegation explicitly; this browser did not expose a definitive permission result.",
-            "permissionsPolicy.modelContextAllowed", permissions.get("modelContextAllowed"), title="Model context permission is unverified",
+            "Verify tools delegation explicitly; this browser did not expose a definitive permission result.",
+            "permissionsPolicy.modelContextAllowed", permissions.get("modelContextAllowed"), title="Tools permission is unverified",
         ))
 
     frames = document.get("frames", []) if isinstance(document.get("frames"), list) else []
@@ -517,12 +544,9 @@ class CommandAPI:
                         "message": f"state_script must return an object: {error}",
                     }
             state_observation = build_state_observation(self.config, script_validation=script_validation)
-            browser_version = getattr(client.browser, "version", None)
-            if callable(browser_version):
-                browser_version = browser_version()
             environment = {
                 "browser": self.config.browser,
-                "version": str(browser_version or "unknown"),
+                "version": _browser_version(client),
                 "channel": self.config.browser_channel or "default",
                 "headless": headless,
                 "platform": platform.platform(),
@@ -921,8 +945,23 @@ class CommandAPI:
                 if expected_capability_fingerprint and fingerprint != expected_capability_fingerprint:
                     raise CommandError("unsafe replay rejected: browser capability fingerprint differs from the recorded run")
                 bundle.preflight = redacted(probe)
-                bundle.browser_environment = redacted({"browser": self.config.browser, "headless": headless, "platform": platform.platform(), "url": client.page.url})
-                bundle.compatibility = Compatibility(browser=self.config.browser, headless=headless, capability_fingerprint=fingerprint, groups=requirements)
+                browser_version = _browser_version(client)
+                bundle.browser_environment = redacted({
+                    "browser": self.config.browser,
+                    "version": browser_version,
+                    "channel": self.config.browser_channel or "default",
+                    "headless": headless,
+                    "platform": platform.platform(),
+                    "url": client.page.url,
+                    "user_agent": probe.get("runtime", {}).get("userAgent"),
+                })
+                bundle.compatibility = Compatibility(
+                    browser=self.config.browser,
+                    browser_version=browser_version,
+                    headless=headless,
+                    capability_fingerprint=fingerprint,
+                    groups=requirements,
+                )
                 script_validation: dict[str, Any] | None = None
                 if self.config.state_script:
                     try:
@@ -1094,11 +1133,12 @@ class CommandAPI:
                      allowed_target_origins: Iterable[str] | None = None) -> RunBundle:
         """Replay a contract bundle without any frontend-specific filesystem shim."""
         scenario, seed, saved = self.replay_bundle(path)
+        replay_api = CommandAPI(_recorded_replay_config(self.config, saved), output_dir=self.output_dir)
         fingerprint_policy = saved.inventory_contract.get("fingerprint_policy", {})
         include_contract_descriptions = bool(
             fingerprint_policy.get("include_descriptions", False)
         ) if isinstance(fingerprint_policy, dict) else False
-        result = await self.run(None, scenario=scenario, run_id=run_id, headless=headless,
+        result = await replay_api.run(None, scenario=scenario, run_id=run_id, headless=headless,
                                 allow_mutations=allow_mutations,
                                 adversarial=bool(saved.execution["adversarial"]), seed=seed,
                                 recorded_schedule=(saved.execution.get("scheduler", {}).get("selected_logical_schedule", saved.execution["schedule"])

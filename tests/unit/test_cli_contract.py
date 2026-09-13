@@ -12,10 +12,9 @@ from webmcp_resilience.models.trace import TraceEvent, TraceRun
 
 
 def test_demo_race_is_a_registered_cli_contract() -> None:
-    result = CliRunner().invoke(app, ["demo-race", "--help"])
+    result = CliRunner().invoke(app, ["demo-race", "--json", "--help"])
     assert result.exit_code == 0
     assert "Resilience Forge" in result.output
-    assert "--json" in result.output
 
 
 @pytest.mark.parametrize(("flag", "expected"), [(None, False), ("--replay-allow-mutations", True)])

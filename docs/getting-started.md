@@ -23,11 +23,22 @@ Set the target and optional observable-state expression in
 base_url: http://localhost:3000
 browser: chromium
 state_script: window.__app.getObservableState()
+# Chromium 151 native WebMCP (when supported by the selected binary):
+browser_channel: chromium
+browser_args: ["--enable-features=WebMCPTesting"]
 ```
 
 The state expression runs in the page and must return an object. It is the
 state source for invariants. If it is absent, the runner observes an empty
 object rather than guessing from the DOM or traffic.
+
+Chromium 151 exposes native `document.modelContext` on real HTTP(S) pages when
+launched with `--enable-features=WebMCPTesting`. The equivalent browser flag is
+`chrome://flags/#enable-webmcp-testing`; `--enable-webmcp-testing` is not the
+Playwright launch argument for this release. Set `browser_channel: chromium` to
+avoid Playwright's default headless shell, which does not expose this
+experimental API. Use `preflight` to verify the active host and Permissions
+Policy support.
 
 ## First proof: the included race fixture
 
@@ -38,6 +49,21 @@ object rather than guessing from the DOM or traffic.
 This intentionally finds a failure in the bundled Resilience Forge app. The
 command starts a temporary local server, saves preflight/validation/run/replay
 bundles, prints the invariant handoff, then stops the server.
+It exits 0 when it successfully finds the intentional failure. In contrast,
+`run` and `replay` exit 1 when their scenario result fails an invariant.
+
+To replay the saved demo bundle after `demo-race` exits, serve the lab again in
+another terminal:
+
+```bash
+.venv/bin/webmcp demo
+# In another terminal:
+.venv/bin/webmcp replay .webmcp/runs/demo-race-failure/bundle.json \
+  --allow-mutations --json
+```
+
+The bundle restores the recorded state expression and target origin. The live
+application is still required; it is not embedded in the evidence bundle.
 
 Use `--json` for one stable machine-readable document:
 

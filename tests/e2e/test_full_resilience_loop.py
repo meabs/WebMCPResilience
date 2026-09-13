@@ -120,6 +120,7 @@ def test_cli_full_loop_replays_a_redacted_adversarial_failure(
     failure_json = json.loads(failure_bundle.read_text())
     assert failure_json["state_observation"]["mode"] == "state_script"
     assert failure_json["state_observation"]["validation"]["valid"] is True
+    assert failure_json["compatibility"]["browser_version"] not in {None, "unknown"}
     assert failure_json["execution"]["schedule"]
     scheduler = failure_json["execution"]["scheduler"]
     assert scheduler["version"] == "1.0"
