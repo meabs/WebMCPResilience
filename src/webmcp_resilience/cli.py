@@ -172,7 +172,7 @@ def demo(host: str = "127.0.0.1", port: int = 4173) -> None: serve(host, port)
 def demo_race(host: str = "127.0.0.1", port: int = 4173,
               seed: int = typer.Option(7, "--seed"),
               run_id: str = typer.Option("demo-race-failure", "--run-id"),
-              json_output: bool = typer.Option(False, "--json", help="Emit machine-readable output.")) -> None:
+              json_output: bool = typer.Option(False, "--json/--no-json", help="Emit machine-readable output.")) -> None:
     """Orchestrate the included local Resilience Forge vulnerable race."""
     server = None
     try:
