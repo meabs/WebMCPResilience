@@ -1,41 +1,48 @@
+<div align="center">
+
 # WebMCP Resilience
 
 **Find the race before an agent finds it in production.**
 
-WebMCP Resilience is a local, deterministic resilience-testing framework for web applications that expose [WebMCP](https://developer.chrome.com/docs/ai/webmcp) tools. It drives a real Chromium page through Playwright, interleaves declared UI actions and `document.modelContext` calls, injects declared faults, checks observable-state invariants, and saves reduced, replayable evidence.
+Deterministic resilience testing for WebMCP web apps.
 
-It answers a question that tool inspection and ordinary browser tests do not:
+[Documentation](#start-here) · [Example fixture](examples/resilience-forge) · [Architecture](docs/architecture.md) · [Where it fits](docs/comparison.md)
 
-> Does the application preserve its business invariants when a person, an agent, and a failure affect the same state at the same time?
+[![Tests](https://github.com/meabs/WebMCPResilience/actions/workflows/test.yml/badge.svg)](https://github.com/meabs/WebMCPResilience/actions/workflows/test.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-3DA639.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-3776AB.svg)](pyproject.toml)
+
+</div>
+
+WebMCP Resilience drives a real Chromium page through Playwright, interleaves
+declared UI actions with `document.modelContext` tool calls, injects bounded
+faults, verifies observable-state invariants, and saves reduced replay bundles.
+
+> **The question it answers:** does your application preserve its business
+> invariants when a person, an agent, and a failure affect the same state at
+> the same time?
 
 ```text
 Chrome DevTools / MCP Inspector / MCP Conformance → Is the tool callable?
 WebMCP Resilience                              → Is the application resilient?
 ```
 
-## Why it exists
+## Start here
 
-An agent-facing application has more than one control surface. A person can click a button while an agent invokes the equivalent page tool. Either action can be valid in isolation—and still create a stale write, duplicate operation, or invalid state when they overlap.
+### Run the included proof fixture
 
-WebMCP Resilience makes those interactions testable without inventing data or pretending that an LLM is deterministic:
-
-- Declared **human, agent, and system actors** run against a live browser page.
-- Bounded, seeded schedules explore declared simultaneous actions.
-- Declared latency, timeout, duplicate, cancellation, navigation, and HTTP faults exercise hostile timing.
-- Observable-state and result invariants expose the application failure.
-- Canonical tool-contract fingerprints detect structural drift before replay.
-- Fresh-session reduction produces the smallest declared-action reproduction that still fails.
-- A versioned, redacted bundle makes the failure reviewable and replayable.
-
-## See it fail in one command
-
-After installation, run the included intentionally vulnerable Resilience Forge fixture. It starts a temporary local server, exercises a human/tool race, reduces the failure, and replays it.
+The Resilience Forge fixture is intentionally vulnerable. Its failure is the
+successful demonstration: the tool finds a human/tool race, minimizes it, and
+replays the evidence.
 
 ```bash
-.venv/bin/webmcp demo-race --json
+git clone https://github.com/meabs/WebMCPResilience.git
+cd WebMCPResilience
+python3 -m venv .venv
+.venv/bin/python -m pip install -e '.[dev]'
+.venv/bin/playwright install chromium
+.venv/bin/webmcp demo-race
 ```
-
-Expected shape of the human output:
 
 ```text
 FAILED  slots.claimed <= 1
@@ -44,23 +51,42 @@ bundle    .webmcp/runs/demo-race-failure/bundle.json
 replay    webmcp replay .webmcp/runs/demo-race-failure/bundle.json --json
 ```
 
-The exact values and paths are emitted in JSON as well. The fixture is deliberately vulnerable; a failed run/replay result is the demonstration working, not an installation failure.
+See the [fixture source and scenario](examples/resilience-forge) for the full
+application and its vulnerable booking flow.
 
-## Install
+### Choose your path
 
-Requires Python 3.12+ and a Playwright Chromium installation.
+| You want to… | Start here |
+| --- | --- |
+| Prove the workflow locally | [`webmcp demo-race`](#run-the-included-proof-fixture) |
+| Test your own WebMCP app | [First project scenario](docs/getting-started.md#first-project-scenario) |
+| Add deterministic checks to CI | [CI pattern](docs/getting-started.md#ci-pattern) |
+| Define concurrency and fault scenarios | [Scenario reference](docs/scenarios-and-replay.md) |
+| Give a coding agent controlled access | [Agent control and safety](docs/agent-control.md) |
 
-```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -e '.[dev]'
-.venv/bin/playwright install chromium
-```
+## What you get
 
-Initialize a project and point it at the application under test:
+- **One execution model** — CLI, Python, terminal console, and local MCP
+  control use the same `CommandAPI` and browser paths.
+- **Real concurrent actors** — declared human, agent, and system actions share
+  a live browser page and bounded, seeded schedules.
+- **Deliberate failure pressure** — latency, timeout, duplicate, cancellation,
+  navigation, and HTTP faults are explicit scenario inputs.
+- **Evidence, not guesses** — observable-state and result invariants identify
+  a failure; fresh-session reduction produces the smallest replayable repro.
+- **Contract-aware replay** — browser capabilities and canonical, redacted
+  tool-contract fingerprints prevent historical evidence being reinterpreted
+  against a changed runtime.
 
-```bash
-.venv/bin/webmcp init
-```
+## What your app needs
+
+Before writing a scenario, have these four things:
+
+1. A page that registers WebMCP tools through `document.modelContext`.
+2. A `base_url` reachable from Playwright.
+3. An explicit `state_script` that returns the observable state used by your
+   invariants.
+4. An isolated test target if you plan to permit mutations.
 
 ```yaml
 # .webmcp/config.yaml
@@ -69,33 +95,36 @@ browser: chromium
 state_script: window.__app.getObservableState()
 ```
 
-`state_script` is a JavaScript expression evaluated in the running page. It must return an object. It is the explicit state boundary used by invariants; the framework does not silently scrape DOM text, network traffic, or hidden application data.
+`state_script` is the declared state boundary. The framework does not silently
+scrape DOM text, network traffic, or hidden application state.
 
-## The everyday workflow
+## A complete workflow
 
 ```bash
-# 1. Collect non-mutating WebMCP/browser readiness evidence.
+# Non-mutating browser and WebMCP readiness evidence.
 .venv/bin/webmcp preflight --ci --json
 
-# 2. Check the scenario before launching the browser workflow.
+# Validate a scenario, then execute seeded schedules in fresh sessions.
 .venv/bin/webmcp validate .webmcp/scenarios/checkout-race.yaml --json
-
-# 3. Exercise declared schedules in fresh browser sessions.
 .venv/bin/webmcp run .webmcp/scenarios/checkout-race.yaml \
   --ci --adversarial --seed 7 --json
 
-# 4. Re-run the exact saved schedule and compatibility contract.
+# Replay a saved failure or compare portable evidence without a browser.
 .venv/bin/webmcp replay .webmcp/runs/<run-id>/bundle.json --json
-
-# 5. Compare two portable runs without launching a browser.
 .venv/bin/webmcp diff left/bundle.json right/bundle.json --json
 ```
 
-Every command writes a portable bundle under `.webmcp/runs/<run-id>/bundle.json`. A bundle contains the scenario, compatibility requirements, browser capability fingerprint, canonical redacted tool-contract inventory and fingerprints, drift status, preflight evidence, selected schedule, trace, state observations, approvals, artifact metadata, result, and replay command. Replay preserves the browser capability check and also rejects a changed live tool-inventory fingerprint with a structured `tool_contract_drift` error.
+`run`, `preflight`, and `replay` save portable evidence under
+`.webmcp/runs/<run-id>/bundle.json`. A bundle records the scenario, runtime
+compatibility, redacted tool-contract inventory, schedule, trace, observable
+state, approvals, artifact metadata, outcome, and replay command. `diff`
+compares two existing bundles without launching a browser.
 
-## Scenarios are portable contracts
+## Scenario in one screen
 
-Scenarios are YAML by design: they can be reviewed in Git, generated by a coding agent, edited in the console, and run unchanged in CI. They are not a second execution engine; CLI, console, local MCP control, and Python/pytest integration share the same core command and browser paths.
+Scenarios are reviewable YAML: coding agents can generate them, humans can
+review them in Git, and the CLI, console, local MCP control, and pytest
+integration run the same contract.
 
 ```yaml
 name: concurrent-tool-and-ui
@@ -117,114 +146,47 @@ invariants:
   - inventory.reserved <= inventory.available
 ```
 
-For a state-aware tool argument, declare a read-only state tool separately:
+For state-aware inputs, fault timing, result invariants, reduction, replay, and
+optional tool-contract assertions, see the [scenario and replay guide](docs/scenarios-and-replay.md).
 
-```yaml
-state:
-  tool: get_checkout_snapshot
-actors:
-  agent:
-    - invoke: confirm_order
-      args:
-        expectedVersion: ${state.version}
-```
+## CLI first. Console and agent access when needed.
 
-`scenario.state.tool` supplies declared values to action arguments. It does not replace the configured `state_script` used for state-invariant evaluation.
-
-Tool-contract expectations are optional. Use them only where a scenario needs
-to pin structural or observable assumptions:
-
-```yaml
-tool_contracts:
-  reserve_inventory:
-    # fingerprint is optional; ordinary scenarios do not need one.
-    fingerprint: "<optional canonical per-tool fingerprint>"
-    required_inputs: [sku, quantity]
-    read_only: false
-    semantic_version: "1"
-    result_invariants:
-      - results.reserve_inventory.OK == 1
-    expected_result_codes: [OK, STALE_STATE]
-```
-
-Discovery validates the pinned fingerprint, required inputs, `readOnlyHint`,
-and declared semantic version before execution. Result assertions operate only
-on returned codes and the deterministic `results.<tool>.<code>` counts. The
-framework detects declared structural and observable contract drift; it does
-not automatically prove that business meaning is unchanged.
-
-## CLI first. Console and agents included.
-
-The CLI is complete on its own. The optional terminal console is a scenario composer and evidence flight deck; it writes ordinary YAML and replays ordinary bundles.
+The CLI is fully capable on its own. The optional terminal console composes
+ordinary scenario YAML and inspects ordinary evidence bundles; it does not
+introduce a second runner.
 
 ```bash
-# Compose from a preflight inventory, then save normal scenario YAML.
+# Compose from a preflight inventory or inspect saved evidence.
 .venv/bin/webmcp console --discovery .webmcp/runs/<preflight-id>/bundle.json
-
-# Inspect a run, compare it with a baseline, or replay it.
 .venv/bin/webmcp console .webmcp/runs/<run-id>/bundle.json --compare baseline.json
 
-# Browse saved runs, pin a baseline with `b`, inspect traces with `t`, replay
-# with `r`, compare with `c`, view repro metadata with `m`, export with `h`.
-.venv/bin/webmcp console --history
-
-# Export redacted incident metadata (never screenshots or sensitive contents).
-.venv/bin/webmcp handoff .webmcp/runs/<run-id>/bundle.json --json
-```
-
-The console has two modes: the scenario composer and the run-history/flight
-deck. Composer actions are ordinary YAML for multiple actors, timed
-`invoke`/`retry`/`cancel`/`click`/`fill`/`select`/`navigate`/`wait` actions,
-executable faults, state invariants, and result invariants. Discovery supplies
-tool schemas and read-only state tools; CommandAPI validation runs before a
-file is saved. Composer accepts either actors JSON or ordered actions JSON, not
-both, and emits every accepted action. The flight deck is keyboard-first: trace view uses `q` to quit,
-`home`/`end` to navigate, `r` to replay, `c` to compare, `m` for safe repro,
-and `h` for safe handoff export. History view adds `b` to pin a baseline and
-`t` to render its redacted chronological timeline. The event list is
-actor-labelled and chronological; `--print` provides the compact
-non-interactive equivalent.
-
-The console never creates a runner. Its injected command module calls the same
-CommandAPI used by CLI, Python, and local MCP control. Only the CLI constructs
-it with `--replay-allow-mutations`; the TUI cannot escalate policy. A replay
-that returns a valid failing bundle is reported as **Failure reproduced** even
-when the CLI exit status is 1; malformed output or contract rejection is a
-replay execution/contract failure.
-
-Coding agents can use the local MCP JSON-RPC server without scraping terminal prose:
-
-```bash
-# Read-only is the default.
+# Start the typed local MCP JSON-RPC adapter in read-only mode.
 .venv/bin/webmcp agent-server --project-root .
-
-# Only for an isolated target explicitly authorised for mutations.
-.venv/bin/webmcp agent-server --project-root . --allow-mutations
 ```
 
-The server is a typed, policy-enforcing adapter over the same `CommandAPI` as the CLI. Its startup policy fixes project root, allowed target origins, concurrency, artifact sensitivity, and mutation authority. Requests cannot elevate permissions; read-only runs reject mutating UI actions and tools; navigation is resolved and origin-checked before browser execution; and screenshots remain metadata-only through the console and agent interface.
-
-This is defence in depth for unsafe agent-originated test requests. It is not a claim of prompt-injection prevention, complete SSRF containment, or enterprise policy administration.
-
-## What preflight checks
-
-`preflight` is browser-native readiness evidence, not official MCP conformance. It reports WebMCP availability, browser/channel, native or compatibility-host mode, secure-context and origin-isolation information, Permissions Policy, iframe topology, tool schemas and annotations, per-tool and complete inventory fingerprints, drift status, state observation configuration, and non-executing cancellation/navigation evidence. Tool fingerprints use name, input schema, output schema, and annotations with recursively sorted keys; descriptions and volatile runtime fields are excluded unless `tool_contract_include_descriptions: true` is explicitly configured.
-
-Chrome describes WebMCP as a proposed, evolving standard. Keep the browser adapter narrow, run preflight in CI, and treat the bundle as evidence of the runtime you actually tested.
+The agent adapter fixes its project root, allowed target origins, concurrency,
+artifact sensitivity, and mutation authority at startup. Requests cannot
+escalate those permissions. Read the [agent safety model](docs/agent-control.md)
+before enabling mutations.
 
 ## Documentation
 
-- [Getting started](docs/getting-started.md) — installation, first scenario, CI loop, and troubleshooting.
-- [Scenarios, scheduling, and replay](docs/scenarios-and-replay.md) — DSL reference, state boundaries, fault timing, reduction, and bundle contract.
-- [Agent control and safety](docs/agent-control.md) — MCP operations, immutable policy, redaction, and CLI-only operation.
-- [Architecture](docs/architecture.md) — execution seams and the concurrency model.
-- [Where it fits](docs/comparison.md) — relationship to DevTools, MCP Inspector, MCP Conformance, Playwright, and browser clouds.
+| Guide | Use it for |
+| --- | --- |
+| [Getting started](docs/getting-started.md) | Your first scenario, CI loop, and troubleshooting |
+| [Scenarios, scheduling, and replay](docs/scenarios-and-replay.md) | DSL, state boundaries, faults, reduction, and bundle contract |
+| [Agent control and safety](docs/agent-control.md) | Local MCP operations, immutable policy, and redaction |
+| [Architecture](docs/architecture.md) | Command seams and concurrency model |
+| [Where it fits](docs/comparison.md) | Boundaries with DevTools, MCP Inspector, Playwright, and browser clouds |
 
 ## Boundaries
 
-WebMCP Resilience does **not** replace Chrome DevTools, MCP Inspector, MCP Conformance, Playwright, browser clouds, or agent evaluation frameworks.
+WebMCP Resilience does not replace Chrome DevTools, MCP Inspector, MCP
+Conformance, Playwright, browser clouds, or agent-evaluation frameworks.
 
-It does not test whether an AI agent is clever enough to find the checkout button. It tests whether the checkout application is robust enough to survive being driven through WebMCP.
+It does not test whether an AI agent is clever enough to find the checkout
+button. It tests whether the checkout application remains robust when driven
+through WebMCP.
 
 ## Contributing and verification
 
@@ -239,4 +201,5 @@ For the browser-backed proof fixture:
 .venv/bin/pytest -m e2e
 ```
 
-See [AGENTS.md](AGENTS.md) for automation guidance. The project is licensed under [Apache-2.0](LICENSE).
+See [AGENTS.md](AGENTS.md) for automation guidance. Licensed under
+[Apache-2.0](LICENSE).
