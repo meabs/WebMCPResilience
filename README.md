@@ -219,7 +219,6 @@ Chrome describes WebMCP as a proposed, evolving standard. Keep the browser adapt
 - [Agent control and safety](docs/agent-control.md) — MCP operations, immutable policy, redaction, and CLI-only operation.
 - [Architecture](docs/architecture.md) — execution seams and the concurrency model.
 - [Where it fits](docs/comparison.md) — relationship to DevTools, MCP Inspector, MCP Conformance, Playwright, and browser clouds.
-- [Launch content kit](docs/webmcp-resilience-content-kit.md) — product and technical blog drafts plus market positioning.
 
 ## Boundaries
 
