@@ -32,3 +32,21 @@ async def test_generic_adapter_discovers_and_invokes_the_lab_contract(lab_server
         assert {tool["name"] for tool in tools} >= {"create_record", "get_observable_state"}
         await adapter.invoke_tool("create_record", {"text": "Created through a discovered generic tool."}, "test-invocation")
         assert (await adapter.get_state())["records"]["created"] == 1
+
+
+async def test_preflight_probes_chromium_tools_permissions_policy(lab_server: str) -> None:
+    async with BrowserClient() as client:
+        assert client.page
+        await client.page.goto(lab_server)
+        await client.page.evaluate("""() => Object.defineProperty(document, 'permissionsPolicy', {
+          configurable: true,
+          value: {
+            features: () => ['tools'],
+            allowsFeature: (feature) => feature === 'tools',
+          },
+        })""")
+        adapter = WebMCPAdapter(client.page)
+        await adapter.install()
+        policy = (await adapter.probe())["permissionsPolicy"]
+        assert policy["feature"] == "tools"
+        assert policy["modelContextAllowed"] is True

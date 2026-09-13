@@ -5,7 +5,7 @@ import pytest
 
 from webmcp_resilience.commands import CommandAPI, CommandError, diff_bundles
 from webmcp_resilience.config import Config
-from webmcp_resilience.models.bundle import Artifact, Compatibility, CompatibilityRequirements, RunBundle
+from webmcp_resilience.models.bundle import Artifact, Compatibility, CompatibilityRequirements, RunBundle, StateObservation
 from webmcp_resilience.models.trace import TraceEvent, TraceRun
 
 
@@ -92,11 +92,17 @@ def replay_contract(*, groups: dict[str, str] | None = None) -> RunBundle:
 def test_command_api_replay_preserves_recorded_adversarial_schedule(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A saved adversarial failure reuses its chosen schedule through CommandAPI."""
     source = replay_contract()
+    source.state_observation = StateObservation(
+        mode="state_script",
+        configured_source="window.__resilienceLab.getState()",
+    )
+    source.browser_environment = {"url": "http://127.0.0.1:4173/"}
     path = source.write(tmp_path / "bundle.json")
     captured: dict[str, object] = {}
 
     async def fake_run(self: CommandAPI, scenario_path: Path | None, **kwargs: object) -> RunBundle:
         captured.update(kwargs)
+        captured["config"] = self.config
         return RunBundle(command="run", scenario=source.scenario, result={"passed": True})
 
     monkeypatch.setattr(CommandAPI, "run", fake_run)
@@ -104,6 +110,10 @@ def test_command_api_replay_preserves_recorded_adversarial_schedule(tmp_path: Pa
     assert result.command == "replay"
     assert captured["adversarial"] is True
     assert captured["recorded_schedule"] == source.execution["schedule"]
+    replay_config = captured["config"]
+    assert isinstance(replay_config, Config)
+    assert replay_config.base_url == "http://127.0.0.1:4173"
+    assert replay_config.state_script == "window.__resilienceLab.getState()"
 
 
 def test_replay_prefers_versioned_selected_logical_schedule(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

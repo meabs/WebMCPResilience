@@ -77,6 +77,12 @@
       }));
       const policy = document.permissionsPolicy || document.featurePolicy;
       const policyFeatures = policy?.features?.() || [];
+      const policyFeature = policyFeatures.includes('tools') ? 'tools'
+        : policyFeatures.includes('model-context') ? 'model-context' : null;
+      let modelContextAllowed = null;
+      if (policyFeature && typeof policy?.allowsFeature === 'function') {
+        try { modelContextAllowed = policy.allowsFeature(policyFeature); } catch (_) { /* probe remains non-fatal */ }
+      }
       const tools = host?.getTools ? [] : null; // Never call it: this evidence probe is non-mutating and API-shape only.
       return {
         api: {
@@ -88,7 +94,7 @@
           cancellation: typeof AbortController === 'function', declarativeOrImperative: tools === null ? 'unavailable' : 'unknown-until-inventory'
         },
         document: { origin: location.origin, url: location.href, secureContext: isSecureContext, crossOriginIsolated, visibilityState: document.visibilityState, isTopLevel: window.top === window, topOrigin, sameOriginWithTop: topOrigin === location.origin, iframeCount: frames.length, frames },
-        permissionsPolicy: { available: Boolean(policy), features: policyFeatures, modelContextAllowed: policy?.allowsFeature?.('model-context') ?? null },
+        permissionsPolicy: { available: Boolean(policy), features: policyFeatures, feature: policyFeature, modelContextAllowed },
         runtime: { userAgent: navigator.userAgent, platform: navigator.platform, headless: /HeadlessChrome/i.test(navigator.userAgent), abortController: typeof AbortController === 'function', navigation: typeof location.assign === 'function' },
         lifecycle: { toolchangeListenerSupported: typeof host?.addEventListener === 'function' }
       };

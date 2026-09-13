@@ -45,14 +45,25 @@ python3 -m venv .venv
 ```
 
 ```text
-FAILED  slots.claimed <= 1
-observed  slots.claimed: 2
+Failed invariant: claims.active <= claims.capacity
+Observed state: {"claims": {"active": 2, "capacity": 1}}
 bundle    .webmcp/runs/demo-race-failure/bundle.json
 replay    webmcp replay .webmcp/runs/demo-race-failure/bundle.json --json
 ```
 
 See the [fixture source and scenario](examples/resilience-forge) for the full
 application and its vulnerable booking flow.
+
+`demo-race` exits 0 when it successfully finds and replays this intentional
+failure. `webmcp run` and `webmcp replay` exit 1 when their scenario result
+fails an invariant. The demo's temporary server stops when it finishes, so
+start the lab in another terminal before replaying its saved bundle:
+
+```bash
+.venv/bin/webmcp demo
+# In another terminal:
+.venv/bin/webmcp replay .webmcp/runs/demo-race-failure/bundle.json --allow-mutations --json
+```
 
 ### Choose your path
 
@@ -93,10 +104,20 @@ Before writing a scenario, have these four things:
 base_url: http://localhost:3000
 browser: chromium
 state_script: window.__app.getObservableState()
+# Chromium 151 native WebMCP:
+browser_channel: chromium
+browser_args: ["--enable-features=WebMCPTesting"]
 ```
 
 `state_script` is the declared state boundary. The framework does not silently
 scrape DOM text, network traffic, or hidden application state.
+
+On Chromium 151, native `document.modelContext` requires
+`--enable-features=WebMCPTesting` for a real HTTP(S) page (also exposed by
+`chrome://flags/#enable-webmcp-testing`). Use `browser_channel: chromium` to
+select the full Chromium binary; Playwright's default headless shell does not
+expose this experimental API. The included lab supplies a compatibility host,
+so its demo works without the flag; preflight reports which host is active.
 
 ## A complete workflow
 
