@@ -56,6 +56,7 @@ def _emit(bundle: RunBundle | dict, *, json_output: bool, output: Path | None = 
                 f"Tool inventory fingerprint: {handoff.get('tool_inventory_fingerprint') or 'unknown'}\n"
                 f"Tool contract drift: {(handoff.get('tool_contract_drift') or {}).get('status', 'not_compared')} "
                 f"({(handoff.get('tool_contract_drift') or {}).get('policy_impact', 'none')})\n"
+                f"Tool-contract replay decision: {(handoff.get('tool_contract_replay_decision') or {}).get('status', 'not_recorded')}\n"
                 f"Bundle: {handoff.get('bundle_path') or payload['output']}\n"
                 f"Reduced repro: {handoff.get('reduced_repro_path') or 'none'}\n"
                 f"Replay: {' '.join(handoff.get('replay_command') or bundle.replay_command)}"
@@ -123,10 +124,10 @@ app.command("inspect")(preflight)
 
 
 @app.command()
-def replay(bundle: Path, ci: bool = typer.Option(True, "--ci/--headed"), allow_mutations: bool = typer.Option(False, "--allow-mutations"), run_id: str | None = typer.Option(None, "--run-id"), output: Path | None = typer.Option(None, "--output"), json_output: bool = typer.Option(False, "--json")) -> None:
+def replay(bundle: Path, ci: bool = typer.Option(True, "--ci/--headed"), allow_mutations: bool = typer.Option(False, "--allow-mutations"), strict_tool_contracts: bool = typer.Option(False, "--strict-tool-contracts"), run_id: str | None = typer.Option(None, "--run-id"), output: Path | None = typer.Option(None, "--output"), json_output: bool = typer.Option(False, "--json")) -> None:
     """Replay only a compatible versioned bundle; unsafe artifacts are rejected."""
     try:
-        api = _api(Path(".webmcp/runs")); result = asyncio.run(api.replay(bundle, run_id=run_id, headless=ci, allow_mutations=allow_mutations)); _emit(result, json_output=json_output, output=output, api=api)
+        api = _api(Path(".webmcp/runs")); result = asyncio.run(api.replay(bundle, run_id=run_id, headless=ci, allow_mutations=allow_mutations, strict_tool_contracts=strict_tool_contracts)); _emit(result, json_output=json_output, output=output, api=api)
         if not result.result["passed"]: raise typer.Exit(1)
     except typer.Exit: raise
     except Exception as error: _command_error(error, json_output)
@@ -155,7 +156,8 @@ def handoff(bundle: Path, output: Path | None = typer.Option(None, "--output"), 
         summary = json.loads(outputs["json"].read_text())
         payload = {"schema_version": "1.0", "contract_version": "1.0", "outputs": {key: str(value) for key, value in outputs.items()},
                    "tool_inventory_fingerprint": summary.get("tool_inventory_fingerprint"),
-                   "tool_contract_drift": summary.get("tool_contract_drift", {})}
+                   "tool_contract_drift": summary.get("tool_contract_drift", {}),
+                   "tool_contract_replay_decision": summary.get("tool_contract_replay_decision", {})}
         if json_output:
             print(json.dumps(payload, sort_keys=True))
         else:

@@ -178,6 +178,7 @@ class ReplayRequest(_Request):
     bundle_id: str | None = None
     source_run_id: str | None = None
     run_id: str | None = None
+    strict_tool_contracts: bool = False
 
     @model_validator(mode="after")
     def one_bundle_reference(self) -> "ReplayRequest":
@@ -732,6 +733,7 @@ class LocalMCPControlAdapter:
                             "status": item.tool_contract_drift.get("status", "not_compared"),
                             "policy_impact": item.tool_contract_drift.get("policy_impact", "none"),
                         },
+                        "tool_contract_replay_decision": item.tool_contract_replay_decision,
                     }
                     for item in page
                 ],
@@ -745,6 +747,7 @@ class LocalMCPControlAdapter:
                     run_id=parsed.run_id,
                     headless=True,
                     allow_mutations=self.policy.mutation_permission,
+                    strict_tool_contracts=parsed.strict_tool_contracts,
                     allowed_target_origins=self.policy.allowed_target_origins,
                 )
             self._record_agent_policy(bundle)

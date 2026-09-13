@@ -29,7 +29,9 @@ textual failure/reproduction evidence, and artifact metadata.
 `get_capabilities` advertises canonical tool-contract drift support and the
 stable replay rejection code. Preflight/run bundles, `list_runs`,
 `get_run_summary`, `diff_runs`, and replay errors expose redacted inventory
-fingerprints and drift status. The MCP adapter does not implement its own
+fingerprints, drift status, and replay decision. `replay_run` accepts
+`strict_tool_contracts: true` to require an exact recorded inventory
+fingerprint. The MCP adapter does not implement its own
 comparison rules; it projects the same `CommandAPI` evidence used by CLI and
 console.
 
@@ -69,6 +71,8 @@ Contract summaries retain schema field names while redacting sensitive values.
 Descriptions and volatile runtime fields do not affect compatibility
 fingerprints by default. Drift errors disclose added, removed, and changed tool
 names and safe structural reasons, never raw secret-bearing defaults.
+Replay uses the saved bundle fingerprint policy rather than the control
+server's current configuration.
 
 ## Scope boundary
 

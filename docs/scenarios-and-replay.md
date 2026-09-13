@@ -120,6 +120,8 @@ or guess new arguments.
 
 ```bash
 .venv/bin/webmcp replay .webmcp/runs/<run-id>/bundle.json --ci --json
+# Opt into exact fingerprint matching, including compatible evolution.
+.venv/bin/webmcp replay .webmcp/runs/<run-id>/bundle.json --strict-tool-contracts --ci --json
 ```
 
 Replay restores a recorded `state_script` and the origin captured in the
@@ -127,19 +129,34 @@ bundle, so a copied bundle does not require a hand-written local
 `.webmcp/config.yaml` for its observable-state boundary. It still executes
 against a live application at that origin; start the application before replay.
 
-Replay rejects incompatible artifacts, including a changed browser capability
-fingerprint or canonical live tool-inventory fingerprint. A tool mismatch is a
-structured `tool_contract_drift` error containing only redacted added, removed,
-and changed tool names plus classified details. This is intentional: a bundle
-is evidence of a specific execution environment, not a request to reinterpret
-old behaviour against a new runtime. Legacy bundles without a recorded tool
-inventory fingerprint retain their previous replay behaviour.
+Replay always retains and compares the canonical recorded tool-inventory
+fingerprint. A changed fingerprint is classified using the bundle's saved
+`fingerprint_policy`, never the current machine's configuration. By default,
+replay permits only proven-compatible drift: optional input fields added,
+required inputs made optional, optional output fields added, and description
+changes when descriptions were excluded from that saved policy. Tool removals,
+new required inputs, narrowed input types or enums, narrowed/removed outputs,
+and `readOnlyHint` or `destructiveHint` changes are breaking and reject. Any
+other change is unknown and rejects. `--strict-tool-contracts` rejects every
+fingerprint drift, including compatible drift.
+Description-only edits remain an exact match under strict mode when the saved
+policy excluded descriptions, because they never change that canonical
+fingerprint; they remain visible in `descriptive_only_changes` diagnostics.
+
+Every replay bundle records the baseline and live fingerprints, saved policy,
+full per-tool drift report, policy impact, and `tool_contract_replay_decision`.
+Rejected replays return structured `tool_contract_drift`, `policy_impact`,
+`replay_decision`, and per-tool reasons in CLI JSON and local MCP responses.
+Before a browser opens, replay rebuilds the canonical contract from the saved
+inventory and requires it to match both saved fingerprints. Missing, malformed,
+or inconsistent evidence is rejected as an `evidence_integrity` contract error.
 
 ## Evidence bundle
 
 `bundle.json` is the handoff contract. It includes compatibility requirements,
 browser evidence, preflight output, canonical redacted per-tool contracts and
-fingerprints, the complete inventory fingerprint, drift/expectation status,
+fingerprints, the complete inventory fingerprint, drift/expectation status and
+replay decision,
 scenario, schedules, trace, state observations, policy approvals, artifacts,
 result, and replay command.
 

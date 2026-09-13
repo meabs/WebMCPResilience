@@ -135,6 +135,7 @@ class RunHistoryEntry:
     browser_fingerprint: str | None
     tool_inventory_fingerprint: str | None
     tool_contract_drift_status: str
+    tool_contract_replay_decision: str
     mutation_authority: str
     artifact_kinds: tuple[str, ...]
     artifact_availability: dict[str, bool]
@@ -170,6 +171,7 @@ class RunHistory:
                 browser_fingerprint=bundle.compatibility.capability_fingerprint,
                 tool_inventory_fingerprint=bundle.compatibility.tool_inventory_fingerprint,
                 tool_contract_drift_status=str(bundle.tool_contract_drift.get("status", "not_compared")),
+                tool_contract_replay_decision=str(bundle.tool_contract_replay_decision.get("status", "not_recorded")),
                 mutation_authority=authority,
                 artifact_kinds=tuple(sorted({item.kind for item in bundle.artifacts})),
                 artifact_availability={item.kind: True for item in bundle.artifacts},

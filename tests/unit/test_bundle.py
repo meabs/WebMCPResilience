@@ -7,6 +7,7 @@ from webmcp_resilience.commands import CommandAPI, CommandError, diff_bundles
 from webmcp_resilience.config import Config
 from webmcp_resilience.models.bundle import Artifact, Compatibility, CompatibilityRequirements, RunBundle, StateObservation
 from webmcp_resilience.models.trace import TraceEvent, TraceRun
+from webmcp_resilience.tool_contracts import build_inventory_contract
 
 
 def test_validate_emits_portable_versioned_bundle(tmp_path: Path) -> None:
@@ -84,7 +85,11 @@ def test_persistence_redacts_signature_and_credential_variants(tmp_path: Path) -
 def replay_contract(*, groups: dict[str, str] | None = None) -> RunBundle:
     scenario = {"name": "race", "actors": {"a": [{"invoke": "read"}], "b": [{"invoke": "read"}]}}
     requirements = CompatibilityRequirements.model_validate(groups or CompatibilityRequirements().model_dump())
-    return RunBundle(command="run", scenario=scenario, requirements=requirements, compatibility=Compatibility(groups=requirements), result={"passed": False},
+    inventory = [{"name": "read", "inputSchema": {"type": "object", "properties": {}}, "annotations": {}}]
+    contract = build_inventory_contract(inventory)
+    return RunBundle(command="run", scenario=scenario, requirements=requirements,
+                     compatibility=Compatibility(groups=requirements, tool_inventory_fingerprint=contract["inventory_fingerprint"]),
+                     tool_inventory=inventory, inventory_contract=contract, result={"passed": False},
                      faults=[], approvals=[],
                      execution={"adversarial": True, "seed": 9, "schedule": [{"offset_ms": 0, "actor": "b", "action_index": 0}, {"offset_ms": 0, "actor": "a", "action_index": 0}], "schedule_index": 1, "requirements": requirements.model_dump(), "fault_configuration": [], "approval_policy": []})
 

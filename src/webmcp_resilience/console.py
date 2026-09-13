@@ -54,6 +54,7 @@ def show_trace(path: Path, console: Console, compare: Path | None = None) -> Non
         console.print(f"[dim]run={bundle.run_id} · result={'PASS' if bundle.result.get('passed') else 'FAIL'} · "
                       f"seed={bundle.execution.get('seed')} · capability={bundle.compatibility.capability_fingerprint or 'unknown'} · "
                       f"tool-contract={bundle.compatibility.tool_inventory_fingerprint or 'unknown'} · drift={bundle.tool_contract_drift.get('status', 'not_compared')} · "
+                      f"replay-decision={bundle.tool_contract_replay_decision.get('status', 'not_recorded')} · "
                       f"authority={authority} · sensitive artifacts=metadata-only[/dim]")
     if baseline is not None:
         console.print(f"[dim]safe redacted artifacts={safe_artifacts} · metadata-only artifacts={metadata_only}[/dim]")

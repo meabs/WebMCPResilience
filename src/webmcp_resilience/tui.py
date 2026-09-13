@@ -158,7 +158,7 @@ class TraceConsole(App[None]):
         return (f"ACTOR EVENTS  {actor_text}    STATE DIFFS  {state_versions}    TOOL CALLS  {calls}    "
                 f"FAULTS  {faults}    FAILURES  {failures}    RESULT  {result}\n"
                 f"POLICY  {authority}    APPROVALS  {len(approvals)}    REDACTION  {'on' if redaction else 'off'}    "
-                f"SENSITIVE ARTIFACTS  metadata-only    TOOL CONTRACT  {(self.bundle.tool_contract_drift.get('status', 'not_compared') if self.bundle else 'unknown')}    "
+                f"SENSITIVE ARTIFACTS  metadata-only    TOOL CONTRACT  {(self.bundle.tool_contract_drift.get('status', 'not_compared') if self.bundle else 'unknown')}/{(self.bundle.tool_contract_replay_decision.get('status', 'not_recorded') if self.bundle else 'not_recorded')}    "
                 f"FILTERS  {filter_text}    {comparison}    [r] replay  [m] minimized repro")
 
     @staticmethod
@@ -363,7 +363,7 @@ class HistoryConsole(App[None]):
     def _item(index: int, entry: Any) -> ListItem:
         marker = "✓" if entry.status == "passed" else "✕" if entry.status == "failed" else "?"
         artifacts = ",".join(entry.artifact_kinds) or "none"
-        text = f"{marker} {entry.run_id:<24} {entry.scenario or '-':<22} {entry.status:<7} seed={entry.seed} contract={entry.tool_contract_drift_status} artifacts={artifacts}"
+        text = f"{marker} {entry.run_id:<24} {entry.scenario or '-':<22} {entry.status:<7} seed={entry.seed} contract={entry.tool_contract_drift_status}/{entry.tool_contract_replay_decision} artifacts={artifacts}"
         return ListItem(Label(text), id=f"history-{index}")
 
     def on_list_view_selected(self, message: ListView.Selected) -> None:
@@ -375,6 +375,7 @@ class HistoryConsole(App[None]):
             "browser_fingerprint": entry.browser_fingerprint,
             "tool_inventory_fingerprint": entry.tool_inventory_fingerprint,
             "tool_contract_drift_status": entry.tool_contract_drift_status,
+            "tool_contract_replay_decision": entry.tool_contract_replay_decision,
             "mutation_authority": entry.mutation_authority,
             "artifact_availability": entry.artifact_availability, "bundle": str(entry.path),
         }))

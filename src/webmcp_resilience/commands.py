@@ -29,6 +29,7 @@ from .tool_contracts import (
     concise_drift_lines,
     no_contract_comparison,
     redact_tool_inventory,
+    tool_contract_replay_decision,
     validate_contract_expectations,
 )
 
@@ -386,10 +387,46 @@ class ToolContractDriftError(CommandError):
 
     code = "tool_contract_drift"
 
-    def __init__(self, report: dict[str, Any]) -> None:
-        self.details = redacted(report)
-        lines = concise_drift_lines(self.details)
+    def __init__(self, report: dict[str, Any], decision: dict[str, Any] | None = None) -> None:
+        safe_report = redacted(report)
+        safe_decision = redacted(decision or tool_contract_replay_decision(safe_report))
+        self.details = safe_report | {
+            "tool_contract_drift": safe_report,
+            "policy_impact": safe_decision.get("policy_impact", safe_report.get("policy_impact")),
+            "replay_decision": safe_decision,
+            "per_tool_reasons": {
+                name: [change.get("summary", "changed") for change in detail.get("changes", [])]
+                for name, detail in safe_report.get("details", {}).items()
+            },
+        }
+        lines = concise_drift_lines(safe_report)
+        if safe_decision.get("status"):
+            lines.append(f"replay decision: {safe_decision['status']}")
         super().__init__("unsafe replay rejected: " + ("\n".join(lines) if lines else "tool inventory fingerprint differs"))
+
+
+class ToolContractEvidenceIntegrityError(ToolContractDriftError):
+    """Saved replay evidence cannot safely establish its own baseline."""
+
+    def __init__(self, saved: RunBundle, reasons: list[str]) -> None:
+        report = {
+            "version": "1.0",
+            "status": "evidence_integrity_error",
+            "changed": True,
+            "policy_impact": "evidence_integrity",
+            "baseline_inventory_fingerprint": saved.inventory_contract.get("inventory_fingerprint"),
+            "current_inventory_fingerprint": saved.compatibility.tool_inventory_fingerprint,
+            "recorded_inventory_fingerprint": saved.compatibility.tool_inventory_fingerprint,
+            "evidence_integrity": {"valid": False, "reasons": reasons},
+            "added_tools": [], "removed_tools": [], "changed_input_schemas": [],
+            "changed_output_schemas": [], "changed_annotations": [],
+            "descriptive_only_changes": [], "unchanged_tools": [],
+            "details": {"inventory_evidence": {"policy_impact": "evidence_integrity", "changes": [
+                {"kind": "evidence_integrity", "summary": reason, "policy_impact": "evidence_integrity"}
+                for reason in reasons
+            ]}},
+        }
+        super().__init__(report, tool_contract_replay_decision(report))
 
 
 class ToolContractExpectationError(CommandError):
@@ -469,6 +506,7 @@ def failure_handoff(bundle: RunBundle, bundle_path: Path | None = None) -> dict[
         "capability_fingerprint": bundle.compatibility.capability_fingerprint,
         "tool_inventory_fingerprint": bundle.compatibility.tool_inventory_fingerprint,
         "tool_contract_drift": redacted(bundle.tool_contract_drift),
+        "tool_contract_replay_decision": redacted(bundle.tool_contract_replay_decision),
         "bundle_path": str(bundle_path) if bundle_path else None,
         "reduced_repro_path": reduced,
         "replay_command": list(bundle.replay_command),
@@ -841,6 +879,7 @@ class CommandAPI:
             "capability_fingerprint": record.compatibility.capability_fingerprint,
             "tool_inventory_fingerprint": record.compatibility.tool_inventory_fingerprint,
             "tool_contract_drift": record.tool_contract_drift,
+            "tool_contract_replay_decision": record.tool_contract_replay_decision,
             "tool_contract_expectations": record.tool_contract_expectations,
             "artifacts": safe_artifacts,
             "replay_command": record.replay_command,
@@ -859,6 +898,7 @@ class CommandAPI:
             f"- Capability fingerprint: {summary.get('capability_fingerprint') or 'unknown'}",
             f"- Tool inventory fingerprint: {summary.get('tool_inventory_fingerprint') or 'unknown'}",
             f"- Tool contract drift: {(summary.get('tool_contract_drift') or {}).get('status', 'not_compared')} ({(summary.get('tool_contract_drift') or {}).get('policy_impact', 'none')})",
+            f"- Tool-contract replay decision: {(summary.get('tool_contract_replay_decision') or {}).get('status', 'not_recorded')}",
             f"- Bundle: {bundle_path}",
             f"- Replay: `{' '.join(summary.get('replay_command') or [])}`",
             "", "## Observed state", "", "```json",
@@ -878,6 +918,8 @@ class CommandAPI:
                   expected_tool_inventory_fingerprint: str | None = None,
                   expected_tool_inventory: list[dict[str, Any]] | None = None,
                   contract_include_descriptions: bool | None = None,
+                  replay_fingerprint_policy: dict[str, Any] | None = None,
+                  strict_tool_contracts: bool = False,
                   recorded_schedule: list[dict[str, Any]] | None = None,
                   allowed_target_origins: Iterable[str] | None = None) -> RunBundle:
         if (scenario_path is None) == (scenario is None):
@@ -1004,9 +1046,41 @@ class CommandAPI:
                         available_tools,
                         include_descriptions=include_contract_descriptions,
                     )
+                    contract_drift["fingerprint_policy"] = replay_fingerprint_policy or {
+                        "include_descriptions": include_contract_descriptions
+                    }
+                    # Keep the rebuilt baseline and recorded fingerprint as
+                    # distinct evidence.  Replay evidence validation has
+                    # already required them to agree; neither overwrites the
+                    # other during later drift classification.
+                    contract_drift["recorded_baseline_inventory_fingerprint"] = expected_tool_inventory_fingerprint
+                    contract_drift["recorded_live_inventory_fingerprint"] = live_contract["inventory_fingerprint"]
+                    if (
+                        live_contract["inventory_fingerprint"] != expected_tool_inventory_fingerprint
+                        and not contract_drift["changed"]
+                    ):
+                        contract_drift.update({
+                            "status": "drift",
+                            "changed": True,
+                            "policy_impact": "unknown",
+                            "details": {"inventory": {"policy_impact": "unknown", "changes": [{
+                                "kind": "inventory_fingerprint",
+                                "summary": "fingerprint changed without a classifiable contract difference",
+                                "policy_impact": "unknown",
+                            }]}},
+                        })
+                    if replay_fingerprint_policy is None:
+                        contract_drift.update({
+                            "status": "policy_mismatch",
+                            "changed": True,
+                            "policy_impact": "policy_mismatch",
+                            "policy_mismatch": "saved bundle has no usable fingerprint_policy",
+                        })
                     bundle.tool_contract_drift = contract_drift
-                    if live_contract["inventory_fingerprint"] != expected_tool_inventory_fingerprint:
-                        raise ToolContractDriftError(contract_drift)
+                    decision = tool_contract_replay_decision(contract_drift, strict=strict_tool_contracts)
+                    bundle.tool_contract_replay_decision = decision
+                    if not decision["allowed"]:
+                        raise ToolContractDriftError(contract_drift, decision)
                 else:
                     bundle.tool_contract_drift = no_contract_comparison(
                         inventory_fingerprint=live_contract["inventory_fingerprint"]
@@ -1083,10 +1157,13 @@ class CommandAPI:
         bundle.result = {"passed": last_error is None, "error": str(last_error) if last_error else None, "schedules": len(chosen), "seed": seed, "contract_version": bundle.schema_version, "engine_version": bundle.compatibility.engine_version,
                          "tool_inventory_fingerprint": bundle.compatibility.tool_inventory_fingerprint,
                          "tool_contract_drift": bundle.tool_contract_drift,
+                         "tool_contract_replay_decision": bundle.tool_contract_replay_decision,
                          "tool_contract_expectations": bundle.tool_contract_expectations}
         bundle.replay_command = ["webmcp", "replay", str(output_root / "bundle.json"), "--run-id", bundle.run_id]
         if allow_mutations:
             bundle.replay_command.append("--allow-mutations")
+        if strict_tool_contracts:
+            bundle.replay_command.append("--strict-tool-contracts")
         if last_error is not None:
             bundle.result["failure_handoff"] = failure_handoff(bundle, output_root / "bundle.json")
         if bundle.trace:
@@ -1103,6 +1180,7 @@ class CommandAPI:
             raise CommandError(f"unsafe replay rejected: {path} is not a versioned run bundle: {error}") from error
         if saved.schema_version != "2.0" or saved.compatibility.runner != "webmcp-resilience/2" or not saved.scenario:
             raise CommandError("unsafe replay rejected: incompatible bundle version or missing scenario")
+        self._validate_replay_inventory_evidence(saved)
         if saved.compatibility.browser and saved.compatibility.browser != self.config.browser:
             raise CommandError(f"unsafe replay rejected: bundle requires {saved.compatibility.browser}, configured browser is {self.config.browser}")
         scenario = Scenario.model_validate(saved.scenario)
@@ -1128,16 +1206,53 @@ class CommandAPI:
         self.schedule_from_descriptor(scenario, recorded_schedule)
         return scenario, int(saved.execution.get("seed", saved.result.get("seed", 0))), saved
 
+    @staticmethod
+    def _validate_replay_inventory_evidence(saved: RunBundle) -> None:
+        """Verify saved inventory evidence before replay can open a browser."""
+        policy = saved.inventory_contract.get("fingerprint_policy")
+        reasons: list[str] = []
+        if not isinstance(policy, dict) or not isinstance(policy.get("include_descriptions"), bool):
+            reasons.append("missing or malformed saved fingerprint_policy")
+            include_descriptions = False
+        else:
+            include_descriptions = policy["include_descriptions"]
+        recorded_contract_fingerprint = saved.inventory_contract.get("inventory_fingerprint")
+        recorded_compatibility_fingerprint = saved.compatibility.tool_inventory_fingerprint
+        if not isinstance(recorded_contract_fingerprint, str) or not recorded_contract_fingerprint:
+            reasons.append("missing or malformed inventory_contract.inventory_fingerprint")
+        if not isinstance(recorded_compatibility_fingerprint, str) or not recorded_compatibility_fingerprint:
+            reasons.append("missing or malformed compatibility.tool_inventory_fingerprint")
+        rebuilt = build_inventory_contract(
+            saved.tool_inventory, include_descriptions=include_descriptions
+        )
+        rebuilt_fingerprint = rebuilt["inventory_fingerprint"]
+        if isinstance(recorded_contract_fingerprint, str) and rebuilt_fingerprint != recorded_contract_fingerprint:
+            reasons.append("stored tool_inventory does not match inventory_contract fingerprint")
+        if isinstance(recorded_compatibility_fingerprint, str) and rebuilt_fingerprint != recorded_compatibility_fingerprint:
+            reasons.append("stored tool_inventory does not match compatibility fingerprint")
+        if (
+            isinstance(recorded_contract_fingerprint, str)
+            and isinstance(recorded_compatibility_fingerprint, str)
+            and recorded_contract_fingerprint != recorded_compatibility_fingerprint
+        ):
+            reasons.append("inventory_contract and compatibility fingerprints disagree")
+        if reasons:
+            raise ToolContractEvidenceIntegrityError(saved, reasons)
+
     async def replay(self, path: Path, *, run_id: str | None = None, headless: bool = True,
                      allow_mutations: bool = False,
+                     strict_tool_contracts: bool = False,
                      allowed_target_origins: Iterable[str] | None = None) -> RunBundle:
         """Replay a contract bundle without any frontend-specific filesystem shim."""
         scenario, seed, saved = self.replay_bundle(path)
         replay_api = CommandAPI(_recorded_replay_config(self.config, saved), output_dir=self.output_dir)
-        fingerprint_policy = saved.inventory_contract.get("fingerprint_policy", {})
-        include_contract_descriptions = bool(
-            fingerprint_policy.get("include_descriptions", False)
-        ) if isinstance(fingerprint_policy, dict) else False
+        fingerprint_policy = saved.inventory_contract.get("fingerprint_policy")
+        saved_policy = (
+            fingerprint_policy if isinstance(fingerprint_policy, dict)
+            and isinstance(fingerprint_policy.get("include_descriptions"), bool)
+            else None
+        )
+        include_contract_descriptions = bool(saved_policy.get("include_descriptions")) if saved_policy else False
         result = await replay_api.run(None, scenario=scenario, run_id=run_id, headless=headless,
                                 allow_mutations=allow_mutations,
                                 adversarial=bool(saved.execution["adversarial"]), seed=seed,
@@ -1147,8 +1262,11 @@ class CommandAPI:
                                 expected_tool_inventory_fingerprint=saved.compatibility.tool_inventory_fingerprint,
                                 expected_tool_inventory=saved.tool_inventory,
                                 contract_include_descriptions=include_contract_descriptions,
+                                replay_fingerprint_policy=saved_policy,
+                                strict_tool_contracts=strict_tool_contracts,
                                 allowed_target_origins=allowed_target_origins)
         result.command = "replay"
+        result.result["tool_contract_replay_decision"] = result.tool_contract_replay_decision
         return result
 
 
@@ -1196,7 +1314,7 @@ def diff_bundles(left: RunBundle, right: RunBundle) -> dict[str, Any]:
             "version": "1.0",
             "status": "policy_mismatch",
             "changed": True,
-            "policy_impact": "unknown",
+            "policy_impact": "policy_mismatch",
             "fingerprint_policy": None,
             "policy_mismatch": {
                 "baseline": left_policy,
@@ -1252,12 +1370,14 @@ def diff_bundles(left: RunBundle, right: RunBundle) -> dict[str, Any]:
         "browser": browser_left,
         "approval_policy": left.execution.get("approval_policy", [item.model_dump(mode="json") for item in left.approvals]),
         "tool_inventory_fingerprint": left.compatibility.tool_inventory_fingerprint,
+        "tool_contract_replay_decision": left.tool_contract_replay_decision,
     }
     compatibility_right = {
         "requirements": right.requirements.model_dump(mode="json"),
         "browser": browser_right,
         "approval_policy": right.execution.get("approval_policy", [item.model_dump(mode="json") for item in right.approvals]),
         "tool_inventory_fingerprint": right.compatibility.tool_inventory_fingerprint,
+        "tool_contract_replay_decision": right.tool_contract_replay_decision,
     }
     behaviour_left = {
         "invariant_outcome": invariant_outcome(left),
@@ -1292,6 +1412,7 @@ def diff_bundles(left: RunBundle, right: RunBundle) -> dict[str, Any]:
             "events_only_right": [item for item in right_events if item not in left_events],
             "compatibility_drift": {"changed": bool(compatibility_changes), "changes": compatibility_changes},
             "tool_contract_drift": tool_contract_drift,
+            "tool_contract_replay_decisions": {"left": left.tool_contract_replay_decision, "right": right.tool_contract_replay_decision},
             "behavioural_drift": {"changed": bool(behavioural_changes), "changes": behavioural_changes},
             "semantic": {"left": {"compatibility": compatibility_left, "behaviour": behaviour_left}, "right": {"compatibility": compatibility_right, "behaviour": behaviour_right}},
             }

@@ -132,13 +132,15 @@ so its demo works without the flag; preflight reports which host is active.
 
 # Replay a saved failure or compare portable evidence without a browser.
 .venv/bin/webmcp replay .webmcp/runs/<run-id>/bundle.json --json
+# Require the original fingerprint exactly, including safe compatible drift.
+.venv/bin/webmcp replay .webmcp/runs/<run-id>/bundle.json --strict-tool-contracts --json
 .venv/bin/webmcp diff left/bundle.json right/bundle.json --json
 ```
 
 `run`, `preflight`, and `replay` save portable evidence under
 `.webmcp/runs/<run-id>/bundle.json`. A bundle records the scenario, runtime
 compatibility, redacted tool-contract inventory, schedule, trace, observable
-state, approvals, artifact metadata, outcome, and replay command. `diff`
+state, approvals, artifact metadata, outcome, replay decision, and replay command. `diff`
 compares two existing bundles without launching a browser.
 
 ## Scenario in one screen

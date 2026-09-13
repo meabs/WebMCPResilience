@@ -9,7 +9,7 @@ from webmcp_resilience.agent_control import AgentPolicy, LocalMCPControlAdapter
 from webmcp_resilience.cli import _emit, app
 from webmcp_resilience.commands import CommandAPI, ToolContractDriftError, build_webmcp_compatibility_report
 from webmcp_resilience.config import Config
-from webmcp_resilience.console_client import bundle_comparison, load_bundle
+from webmcp_resilience.console_client import RunHistory, bundle_comparison, load_bundle
 from webmcp_resilience.engine.invariants import InvariantError
 from webmcp_resilience.engine.runner import ScenarioRunner
 from webmcp_resilience.models.bundle import (
@@ -24,6 +24,7 @@ from webmcp_resilience.tool_contracts import (
     build_inventory_contract,
     compare_tool_inventories,
     redact_tool_inventory,
+    tool_contract_replay_decision,
     validate_contract_expectations,
 )
 
@@ -232,15 +233,56 @@ def test_invalid_json_schema_strings_are_replaced_without_persisting_raw_content
         ([tool(output_schema={"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]})], [tool(output_schema={"type": "object", "properties": {}})], "breaking", "changed_output_schemas"),
         ([tool(output_schema={"type": "string"})], [tool(output_schema={"type": "number"})], "breaking", "changed_output_schemas"),
         ([tool()], [tool(input_schema={"type": "object", "properties": {"note": {"type": "string"}}})], "compatible", "changed_input_schemas"),
-        ([tool(description="before")], [tool(description="after")], "compatible", "descriptive_only_changes"),
+        ([tool(input_schema={"type": "object", "properties": {"note": {"type": "string"}}, "required": ["note"]})], [tool(input_schema={"type": "object", "properties": {"note": {"type": "string"}}})], "compatible", "changed_input_schemas"),
+        ([tool(output_schema={"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]})], [tool(output_schema={"type": "object", "properties": {"code": {"type": "string"}}})], "breaking", "changed_output_schemas"),
+        ([tool(description="before")], [tool(description="after")], "none", "descriptive_only_changes"),
         ([tool(input_schema={"type": "object", "minProperties": 1})], [tool(input_schema={"type": "object", "minProperties": 2})], "unknown", "changed_input_schemas"),
     ],
 )
 def test_contract_drift_classification(before: list[dict], after: list[dict], impact: str, category: str) -> None:
     report = compare_tool_inventories(before, after)
-    assert report["changed"] is True
+    assert report["changed"] is (category != "descriptive_only_changes")
     assert report["policy_impact"] == impact
     assert report[category]
+
+
+def test_compatible_drift_is_allowed_by_default_and_rejected_in_strict_mode() -> None:
+    report = compare_tool_inventories(
+        [tool(input_schema={"type": "object", "properties": {}})],
+        [tool(input_schema={"type": "object", "properties": {"locale": {"type": "string"}}})],
+    )
+    allowed = tool_contract_replay_decision(report)
+    strict = tool_contract_replay_decision(report, strict=True)
+    assert report["policy_impact"] == "compatible"
+    assert allowed["status"] == "allowed_compatible_drift"
+    assert allowed["reasons"] == ["optional input added: locale"]
+    assert strict["status"] == "rejected_strict_tool_contracts"
+
+
+def test_policy_mismatch_is_always_rejected() -> None:
+    report = {
+        "status": "policy_mismatch",
+        "changed": True,
+        "policy_impact": "policy_mismatch",
+        "baseline_inventory_fingerprint": "baseline",
+        "current_inventory_fingerprint": "live",
+        "details": {},
+    }
+    assert tool_contract_replay_decision(report)["status"] == "rejected_policy_mismatch"
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "expected"),
+    [
+        ([tool(output_schema={"type": "object", "properties": {}})], [tool(output_schema={"type": "object", "properties": {"locale": {"type": "string"}}})], "allowed_compatible_drift"),
+        ([tool(input_schema={"type": "object", "properties": {"quantity": {"type": "integer"}}})], [tool(input_schema={"type": "object", "properties": {"quantity": {"type": "integer"}}, "required": ["quantity"]})], "rejected_breaking_drift"),
+        ([tool(output_schema={"type": "string"})], [tool(output_schema={"type": "number"})], "rejected_breaking_drift"),
+        ([tool(annotations={"readOnlyHint": True})], [tool(annotations={"readOnlyHint": False})], "rejected_breaking_drift"),
+        ([tool(input_schema={"type": "object", "minProperties": 1})], [tool(input_schema={"type": "object", "minProperties": 2})], "rejected_unknown_drift"),
+    ],
+)
+def test_replay_decision_follows_all_drift_categories(before: list[dict], after: list[dict], expected: str) -> None:
+    assert tool_contract_replay_decision(compare_tool_inventories(before, after))["status"] == expected
 
 
 def test_inventory_diff_reports_added_removed_changed_and_unchanged_names() -> None:
@@ -258,12 +300,33 @@ def test_description_comparison_fingerprints_follow_opt_in_mode() -> None:
     after = [tool(description="after")]
     ignored = compare_tool_inventories(before, after, include_descriptions=False)
     included = compare_tool_inventories(before, after, include_descriptions=True)
-    assert ignored["policy_impact"] == "compatible"
+    assert ignored["policy_impact"] == "none"
     assert ignored["descriptive_only_changes"] == ["reserve_inventory"]
     assert ignored["baseline_inventory_fingerprint"] == ignored["current_inventory_fingerprint"]
-    assert included["policy_impact"] == "compatible"
+    assert included["policy_impact"] == "unknown"
     assert included["descriptive_only_changes"] == ["reserve_inventory"]
     assert included["baseline_inventory_fingerprint"] != included["current_inventory_fingerprint"]
+
+
+def test_mixed_description_and_optional_input_drift_uses_the_saved_description_policy() -> None:
+    before = [tool(description="before")]
+    after = [tool(
+        description="after",
+        input_schema={"type": "object", "properties": {"locale": {"type": "string"}}},
+    )]
+    included = compare_tool_inventories(before, after, include_descriptions=True)
+    excluded = compare_tool_inventories(before, after, include_descriptions=False)
+
+    assert included["policy_impact"] == "unknown"
+    assert [change["kind"] for change in included["details"]["reserve_inventory"]["changes"]] == [
+        "input_schema", "description"
+    ]
+    assert tool_contract_replay_decision(included)["status"] == "rejected_unknown_drift"
+
+    assert excluded["policy_impact"] == "compatible"
+    assert [change["kind"] for change in excluded["details"]["reserve_inventory"]["changes"]] == ["input_schema"]
+    assert excluded["descriptive_only_changes"] == ["reserve_inventory"]
+    assert tool_contract_replay_decision(excluded)["status"] == "allowed_compatible_drift"
 
 
 def test_yaml_contract_expectations_are_optional_and_validate_live_discovery(tmp_path: Path) -> None:
@@ -377,17 +440,70 @@ def test_replay_contract_mismatch_raises_structured_error_before_execution(tmp_p
 
 
 @pytest.mark.parametrize(
-    ("include_descriptions", "rejected"),
-    [(False, False), (True, True)],
+    "tampered_inventory",
+    [
+        [tool(input_schema={"type": "object", "properties": {"quantity": {"type": "integer"}}, "required": ["quantity"]})],
+        [],
+    ],
+)
+def test_replay_rejects_tampered_inventory_evidence_before_opening_browser(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tampered_inventory: list[dict],
+) -> None:
+    baseline = [tool()]
+    contract = build_inventory_contract(baseline)
+    scenario = Scenario.model_validate({"name": "tampered-evidence", "actors": {"agent": [{"invoke": "reserve_inventory"}]}})
+    requirements = CompatibilityRequirements.model_validate(scenario.compatibility["requires"])
+    approvals = [ApprovalRecord(authority="read_only", reason="default read-only policy")]
+    bundle = RunBundle(
+        command="run", run_id="tampered-baseline", scenario=scenario.model_dump(mode="json"),
+        requirements=requirements,
+        compatibility=Compatibility(groups=requirements, tool_inventory_fingerprint=contract["inventory_fingerprint"]),
+        tool_inventory=baseline, inventory_contract=contract, faults=[], approvals=approvals,
+        execution={
+            "adversarial": False, "seed": 0,
+            "schedule": [{"offset_ms": 0, "actor": "agent", "action_index": 0}],
+            "schedule_index": 0, "requirements": requirements.model_dump(mode="json"),
+            "fault_configuration": [], "approval_policy": [item.model_dump(mode="json") for item in approvals],
+        },
+    )
+    path = bundle.write(tmp_path / "tampered.json")
+    payload = json.loads(path.read_text())
+    # Keep the recorded inventory-contract and fingerprint equal to the live
+    # baseline; only the stored descriptor is forged.
+    payload["tool_inventory"] = tampered_inventory
+    path.write_text(json.dumps(payload))
+
+    def browser_must_not_start(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("tampered evidence must be rejected before browser execution")
+
+    monkeypatch.setattr("webmcp_resilience.commands.BrowserClient", browser_must_not_start)
+    with pytest.raises(ToolContractDriftError) as caught:
+        asyncio.run(CommandAPI(Config(base_url="https://app.example"), output_dir=tmp_path / "runs").replay(path))
+    assert caught.value.details["replay_decision"]["status"] == "rejected_evidence_integrity"
+    assert "stored tool_inventory does not match" in caught.value.details["replay_decision"]["reasons"][0]
+
+
+@pytest.mark.parametrize(
+    ("include_descriptions", "rejected", "optional_input_added"),
+    [(False, False, False), (True, True, False), (False, False, True), (True, True, True)],
 )
 def test_replay_description_drift_follows_recorded_fingerprint_policy(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     include_descriptions: bool,
     rejected: bool,
+    optional_input_added: bool,
 ) -> None:
     baseline = [tool(description="before")]
-    changed = [tool(description="after")]
+    changed = [tool(
+        description="after",
+        input_schema=(
+            {"type": "object", "properties": {"locale": {"type": "string"}}}
+            if optional_input_added else None
+        ),
+    )]
     contract = build_inventory_contract(
         baseline, include_descriptions=include_descriptions
     )
@@ -485,15 +601,44 @@ def test_replay_description_drift_follows_recorded_fingerprint_policy(
             caught.value.details["baseline_inventory_fingerprint"]
             != caught.value.details["current_inventory_fingerprint"]
         )
+        with pytest.raises(ToolContractDriftError) as strict:
+            asyncio.run(CommandAPI(config, output_dir=tmp_path / "strict-runs").replay(
+                saved_path,
+                run_id="description-replay-strict",
+                strict_tool_contracts=True,
+            ))
+        assert strict.value.details["replay_decision"]["status"] == (
+            "rejected_unknown_drift" if optional_input_added else "rejected_strict_tool_contracts"
+        )
     else:
         result = asyncio.run(replay)
         assert result.command == "replay"
         assert result.result["passed"] is True
+        assert result.tool_contract_replay_decision["status"] == (
+            "allowed_compatible_drift" if optional_input_added else "allowed_exact_match"
+        )
+        persisted = json.loads(result.write(tmp_path / "persisted-replay.json").read_text())
+        assert persisted["tool_contract_replay_decision"] == result.tool_contract_replay_decision
         assert result.tool_contract_drift["descriptive_only_changes"] == ["reserve_inventory"]
         assert (
             result.tool_contract_drift["baseline_inventory_fingerprint"]
-            == result.tool_contract_drift["current_inventory_fingerprint"]
-        )
+            != result.tool_contract_drift["current_inventory_fingerprint"]
+        ) is optional_input_added
+        if optional_input_added:
+            with pytest.raises(ToolContractDriftError) as strict:
+                asyncio.run(CommandAPI(config, output_dir=tmp_path / "strict-runs").replay(
+                    saved_path,
+                    run_id="description-replay-strict",
+                    strict_tool_contracts=True,
+                ))
+            assert strict.value.details["replay_decision"]["status"] == "rejected_strict_tool_contracts"
+        else:
+            strict = asyncio.run(CommandAPI(config, output_dir=tmp_path / "strict-runs").replay(
+                saved_path,
+                run_id="description-replay-strict",
+                strict_tool_contracts=True,
+            ))
+            assert strict.tool_contract_replay_decision["status"] == "allowed_exact_match"
 
 
 def test_cli_and_mcp_replay_errors_keep_structured_drift_details(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -512,6 +657,8 @@ def test_cli_and_mcp_replay_errors_keep_structured_drift_details(tmp_path: Path,
     cli_error = json.loads(cli.output)
     assert cli_error["error_code"] == "tool_contract_drift"
     assert cli_error["details"]["policy_impact"] == "breaking"
+    assert cli_error["details"]["replay_decision"]["status"] == "rejected_breaking_drift"
+    assert cli_error["details"]["tool_contract_drift"]["changed_input_schemas"] == ["reserve_inventory"]
 
     adapter = LocalMCPControlAdapter(
         CommandAPI(Config(), output_dir=tmp_path / ".webmcp" / "runs"),
@@ -523,6 +670,48 @@ def test_cli_and_mcp_replay_errors_keep_structured_drift_details(tmp_path: Path,
     assert enveloped["ok"] is False
     assert enveloped["error"]["code"] == "tool_contract_drift"
     assert enveloped["error"]["details"]["changed_input_schemas"] == ["reserve_inventory"]
+    assert enveloped["error"]["details"]["replay_decision"] == cli_error["details"]["replay_decision"]
+
+
+def test_allowed_compatible_description_replay_decision_agrees_across_interfaces(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    decision = {
+        "status": "allowed_compatible_drift", "allowed": True,
+        "strict_tool_contracts": False, "baseline_fingerprint": "baseline",
+        "live_fingerprint": "live", "policy_impact": "compatible",
+        "reasons": ["optional input added: locale"],
+    }
+
+    async def replay_exact(self: CommandAPI, *_args: object, **_kwargs: object) -> RunBundle:
+        return RunBundle(
+            command="replay", run_id="compatible-description-input", result={"passed": True,
+                "tool_contract_replay_decision": decision},
+            tool_contract_replay_decision=decision,
+        )
+
+    monkeypatch.setattr(CommandAPI, "replay", replay_exact)
+    monkeypatch.chdir(tmp_path)
+    cli = CliRunner().invoke(app, ["replay", "saved.json", "--json"])
+    assert cli.exit_code == 0, cli.output
+    cli_payload = json.loads(cli.output)
+    assert cli_payload["tool_contract_replay_decision"] == decision
+    persisted = json.loads(Path(cli_payload["output"]).read_text())
+    assert persisted["tool_contract_replay_decision"] == decision
+
+    project = tmp_path / "project"
+    project.mkdir()
+    adapter = LocalMCPControlAdapter(
+        CommandAPI(Config(), output_dir=project / ".webmcp" / "runs"),
+        AgentPolicy(project, "http://localhost:3000"),
+    )
+    mcp = asyncio.run(adapter.call("replay_run", {
+        "source_run_id": "saved", "run_id": "compatible-description-input",
+        "strict_tool_contracts": False,
+    }))
+    assert mcp["bundle"]["tool_contract_replay_decision"] == decision
+    history = RunHistory(project / ".webmcp" / "runs").entries()
+    assert history[0].tool_contract_replay_decision == decision["status"]
 
 
 def test_cli_console_and_mcp_surface_the_same_contract_diff(tmp_path: Path) -> None:

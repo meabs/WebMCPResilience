@@ -171,6 +171,7 @@ class RunBundle(BaseModel):
     tool_contract_drift: dict[str, Any] = Field(default_factory=lambda: {
         "version": "1.0", "status": "not_compared", "changed": False, "policy_impact": "none"
     })
+    tool_contract_replay_decision: dict[str, Any] = Field(default_factory=dict)
     tool_contract_expectations: dict[str, Any] = Field(default_factory=lambda: {
         "version": "1.0", "status": "not_declared", "passed": True, "checks": [], "failures": []
     })

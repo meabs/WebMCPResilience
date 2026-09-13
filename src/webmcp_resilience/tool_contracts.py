@@ -300,12 +300,16 @@ def _schema_policy(before: Any, after: Any, *, output: bool) -> tuple[str, list[
         return "breaking" if output else "unknown", ["schema representation changed"]
 
     before_types, after_types = _types(before), _types(after)
-    if before_types and after_types and after_types < before_types:
+    if before_types is None and after_types is not None:
+        reasons.append("type narrowed")
+    elif before_types and after_types and after_types < before_types:
         reasons.append("type narrowed")
     elif before_types and after_types and before_types != after_types:
         (reasons if output else unknown_reasons).append("output type changed" if output else "type changed")
     before_enum, after_enum = _enums(before), _enums(after)
-    if before_enum and after_enum and after_enum < before_enum:
+    if before_enum is None and after_enum is not None:
+        reasons.append("enum narrowed")
+    elif before_enum and after_enum and after_enum < before_enum:
         reasons.append("enum narrowed")
 
     before_required = set(before.get("required", [])) if isinstance(before.get("required", []), list) else set()
@@ -314,6 +318,8 @@ def _schema_policy(before: Any, after: Any, *, output: bool) -> tuple[str, list[
     if newly_required:
         label = "output schema" if output else "input schema"
         reasons.append(f"{label}: {', '.join(newly_required)} now required")
+    if output and before_required - after_required:
+        reasons.append(f"output schema fields no longer required: {', '.join(sorted(before_required - after_required))}")
 
     before_properties = before.get("properties") if isinstance(before.get("properties"), dict) else {}
     after_properties = after.get("properties") if isinstance(after.get("properties"), dict) else {}
@@ -341,17 +347,20 @@ def _schema_policy(before: Any, after: Any, *, output: bool) -> tuple[str, list[
         reduced_after = deepcopy(after)
         reduced_after["properties"] = {key: value for key, value in after_properties.items() if key not in added}
         if reduced_before == reduced_after:
-            return "compatible", [f"optional {'output fields' if output else 'inputs'} added: {', '.join(added)}"]
+            return "compatible", [f"optional {'output field' if output else 'input'} added: {', '.join(added)}"]
 
     # Removing an input requirement widens accepted input; adding an output
     # field widens observable data. Both are compatible when that is all.
-    if before_required - after_required:
+    if not output and before_required - after_required:
         reduced_before = deepcopy(before)
-        reduced_before["required"] = sorted(after_required)
+        if after_required:
+            reduced_before["required"] = sorted(after_required)
+        else:
+            reduced_before.pop("required", None)
         if reduced_before == after:
             return "compatible", ["required fields became optional"]
     if output and added:
-        return "compatible", [f"optional output fields added: {', '.join(added)}"]
+        return "compatible", [f"optional output field added: {', '.join(added)}"]
     return "unknown", ["schema changed and needs human review"]
 
 
@@ -437,14 +446,19 @@ def compare_tool_inventories(
         compatibility_after = canonical_tool(after)
         full_before = canonical_tool(before, include_descriptions=True)
         full_after = canonical_tool(after, include_descriptions=True)
-        if not changes and compatibility_before == compatibility_after and full_before != full_after:
+        if full_before.get("description") != full_after.get("description"):
             descriptive.append(name)
-            changes.append({"kind": "description", "summary": "descriptive-only change", "policy_impact": "compatible"})
+            if include_descriptions:
+                changes.append({
+                    "kind": "description",
+                    "summary": "description changed under recorded fingerprint policy",
+                    "policy_impact": "unknown",
+                })
         if changes:
             tool_impact = _impact(change["policy_impact"] for change in changes)
             impacts.append(tool_impact)
             details[name] = {"policy_impact": tool_impact, "changes": changes}
-        else:
+        elif name not in descriptive:
             unchanged.append(name)
 
     changed = bool(details)
@@ -526,3 +540,57 @@ def concise_drift_lines(report: Mapping[str, Any]) -> list[str]:
         lines.append(f"changed: {name} ({summaries})")
     lines.append(f"policy impact: {report.get('policy_impact', 'unknown')}")
     return lines
+
+
+def tool_contract_replay_decision(
+    report: Mapping[str, Any], *, strict: bool = False
+) -> dict[str, Any]:
+    """Make the replay gate explicit without changing canonical evidence.
+
+    The caller supplies the report built using the fingerprint policy saved in
+    the source bundle.  This intentionally never consults ambient config.
+    """
+    impact = str(report.get("policy_impact", "unknown"))
+    reasons = [
+        change.get("summary", "contract changed")
+        for detail in (report.get("details", {}) or {}).values()
+        if isinstance(detail, Mapping)
+        for change in detail.get("changes", [])
+        if isinstance(change, Mapping)
+    ]
+    description_only_fingerprint_drift = bool(report.get("descriptive_only_changes")) and all(
+        change.get("kind") == "description"
+        for detail in (report.get("details", {}) or {}).values()
+        if isinstance(detail, Mapping)
+        for change in detail.get("changes", [])
+        if isinstance(change, Mapping)
+    )
+    if report.get("status") == "evidence_integrity_error":
+        status, allowed = "rejected_evidence_integrity", False
+    elif report.get("status") == "policy_mismatch":
+        status, allowed = "rejected_policy_mismatch", False
+    elif (
+        not report.get("changed")
+        and report.get("baseline_inventory_fingerprint") is not None
+        and report.get("baseline_inventory_fingerprint") == report.get("current_inventory_fingerprint")
+    ):
+        status, allowed = "allowed_exact_match", True
+    elif strict and description_only_fingerprint_drift:
+        status, allowed = "rejected_strict_tool_contracts", False
+    elif impact == "compatible" and not strict:
+        status, allowed = "allowed_compatible_drift", True
+    elif impact == "compatible":
+        status, allowed = "rejected_strict_tool_contracts", False
+    elif impact == "breaking":
+        status, allowed = "rejected_breaking_drift", False
+    else:
+        status, allowed = "rejected_unknown_drift", False
+    return {
+        "status": status,
+        "allowed": allowed,
+        "strict_tool_contracts": strict,
+        "baseline_fingerprint": report.get("baseline_inventory_fingerprint"),
+        "live_fingerprint": report.get("current_inventory_fingerprint"),
+        "policy_impact": "policy_mismatch" if report.get("status") == "policy_mismatch" else impact,
+        "reasons": reasons,
+    }
