@@ -18,22 +18,11 @@ WebMCP Resilience drives a real Chromium page through Playwright, interleaves
 declared UI actions with `document.modelContext` tool calls, injects bounded
 faults, verifies observable-state invariants, and saves reduced replay bundles.
 
-> **The question it answers:** does your application preserve its business
-> invariants when a person, an agent, and a failure affect the same state at
-> the same time?
+## See it find and replay a failure
 
-```text
-Chrome DevTools / MCP Inspector / MCP Conformance → Is the tool callable?
-WebMCP Resilience                              → Is the application resilient?
-```
-
-## Start here
-
-### Run the included proof fixture
-
-The Resilience Forge fixture is intentionally vulnerable. Its failure is the
-successful demonstration: the tool finds a human/tool race, minimizes it, and
-replays the evidence.
+The included Resilience Forge fixture is intentionally vulnerable. Run it to
+watch WebMCP Resilience find a human/tool race, minimize it, and save a
+replayable evidence bundle.
 
 ```bash
 git clone https://github.com/meabs/WebMCPResilience.git
@@ -65,11 +54,22 @@ start the lab in another terminal before replaying its saved bundle:
 .venv/bin/webmcp replay .webmcp/runs/demo-race-failure/bundle.json --allow-mutations --json
 ```
 
+> **The question it answers:** does your application preserve its business
+> invariants when a person, an agent, and a failure affect the same state at
+> the same time?
+
+```text
+Chrome DevTools / MCP Inspector / MCP Conformance → Is the tool callable?
+WebMCP Resilience                              → Is the application resilient?
+```
+
+## Start here
+
 ### Choose your path
 
 | You want to… | Start here |
 | --- | --- |
-| Prove the workflow locally | [`webmcp demo-race`](#run-the-included-proof-fixture) |
+| Prove the workflow locally | [`webmcp demo-race`](#see-it-find-and-replay-a-failure) |
 | Test your own WebMCP app | [First project scenario](docs/getting-started.md#first-project-scenario) |
 | Add deterministic checks to CI | [CI pattern](docs/getting-started.md#ci-pattern) |
 | Define concurrency and fault scenarios | [Scenario reference](docs/scenarios-and-replay.md) |
