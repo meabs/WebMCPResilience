@@ -183,13 +183,21 @@ the timing matrix above. Provide either the actors JSON object or the ordered
 actions JSON list; supplying both is rejected so no accepted action can be
 silently discarded. There is no metadata-only fault control.
 
-`webmcp console --history` opens the read-only run-history workspace. History
-keys are `b` pin baseline, `t` render the redacted timeline, `r` replay, `c`
-compare, `m` show safe minimized-repro metadata, and `h` export a safe
-handoff. Trace view also supports `q`, `home`, `end`, `r`, `c`, `m`, and `h`.
-The timeline is an actor-labelled chronological event list with nested state
-diffs; it does not provide per-actor lane or event/tool filter views. The same
-compact chronological view is available as
+`webmcp console --history` opens the read-only run-history workspace.
+
+| View | Key | What it does |
+| --- | --- | --- |
+| History | `b` | Pin the selected run as the comparison baseline. |
+| History | `t` | Open the redacted timeline. |
+| History or timeline | `r` / `c` | Replay the run / compare it with the baseline. |
+| History or timeline | `m` / `h` | Show safe minimized-reproduction details / export a safe handoff. |
+| Timeline | `q` | Close the timeline. |
+| Timeline | `home` / `end` | Jump to the first / last event. |
+
+The timeline is a time-ordered list of actions, labelled by actor, with the
+state changes nested below each action. It does not provide separate lanes for
+each actor or filters by event or tool. The same compact chronological view is
+available as
 `webmcp console <bundle> --print` for CI logs.
 
 Replay classification is based on the fresh JSON bundle/result: an expected

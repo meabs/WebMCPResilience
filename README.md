@@ -14,9 +14,14 @@ Deterministic resilience testing for WebMCP web apps.
 
 </div>
 
-WebMCP Resilience drives a real Chromium page through Playwright, interleaves
-declared UI actions with `document.modelContext` tool calls, injects bounded
-faults, verifies observable-state invariants, and saves reduced replay bundles.
+WebMCP Resilience checks whether a web app stays correct when a person and an
+AI tool use it at the same time. It adds familiar problems such as slow
+responses or repeated calls, then saves a small record you can rerun if it
+finds a bug.
+
+*Two small terms: an **actor** is the person, AI tool, or system taking an
+action; an **invariant** is a rule the app must never break, such as “do not
+reserve more items than are available.”*
 
 ## See it find and replay a failure
 
@@ -48,10 +53,9 @@ Replay: webmcp replay .webmcp/runs/demo-race-failure/bundle.json --run-id demo-r
 See the [fixture source and scenario](examples/resilience-forge) for the full
 application and its vulnerable booking flow.
 
-`demo-race` exits 0 when it successfully finds and replays this intentional
-failure. `webmcp run` and `webmcp replay` exit 1 when their scenario result
-fails an invariant. The demo's temporary server stops when it finishes, so
-start the lab in another terminal before replaying its saved bundle:
+`demo-race` exits 0 when it finds and replays this intentional failure. The
+demo's temporary server stops when it finishes, so start the lab in another
+terminal before replaying its saved bundle:
 
 ```bash
 .venv/bin/webmcp demo
@@ -59,9 +63,11 @@ start the lab in another terminal before replaying its saved bundle:
 .venv/bin/webmcp replay .webmcp/runs/demo-race-failure/bundle.json --allow-mutations --json
 ```
 
-> **The question it answers:** does your application preserve its business
-> invariants when a person, an agent, and a failure affect the same state at
-> the same time?
+## Why it exists
+
+An AI tool can call your site successfully while still triggering a bug when it
+overlaps with a person’s action. WebMCP Resilience finds those timing bugs and
+gives you a repeatable record to fix them before they affect users.
 
 ```text
 Chrome DevTools / MCP Inspector / MCP Conformance → Is the tool callable?
@@ -79,20 +85,6 @@ WebMCP Resilience                              → Is the application resilient?
 | Add deterministic checks to CI | [CI pattern](docs/getting-started.md#ci-pattern) |
 | Define concurrency and fault scenarios | [Scenario reference](docs/scenarios-and-replay.md) |
 | Give a coding agent controlled access | [Agent control and safety](docs/agent-control.md) |
-
-## What you get
-
-- **One execution model** — CLI, Python, terminal console, and local MCP
-  control use the same `CommandAPI` and browser paths.
-- **Real concurrent actors** — declared human, agent, and system actions share
-  a live browser page and bounded, seeded schedules.
-- **Deliberate failure pressure** — latency, timeout, duplicate, cancellation,
-  navigation, and HTTP faults are explicit scenario inputs.
-- **Evidence, not guesses** — observable-state and result invariants identify
-  a failure; fresh-session reduction produces the smallest replayable repro.
-- **Contract-aware replay** — browser capabilities and canonical, redacted
-  tool-contract fingerprints prevent historical evidence being reinterpreted
-  against a changed runtime.
 
 ## What your app needs
 
@@ -151,8 +143,11 @@ compares two existing bundles without launching a browser.
 ## Scenario in one screen
 
 Scenarios are reviewable YAML: coding agents can generate them, humans can
-review them in Git, and the CLI, console, local MCP control, and pytest
-integration run the same contract.
+review them in Git, and every way of running the tool uses the same file.
+
+This scenario tells the framework: while an AI calls `reserve_inventory`, a
+person also clicks reserve—check that inventory never reserves more than is
+available.
 
 ```yaml
 name: concurrent-tool-and-ui
@@ -176,6 +171,19 @@ invariants:
 
 For state-aware inputs, fault timing, result invariants, reduction, replay, and
 optional tool-contract assertions, see the [scenario and replay guide](docs/scenarios-and-replay.md).
+
+## Features
+
+- **One consistent workflow** — the command line, Python, terminal console,
+  and local agent control all run the same browser checks.
+- **People and tools acting together** — describe actions by a person, an AI
+  tool, or the system on one live page, at controlled times.
+- **Common failure conditions** — test slow responses, timeouts, duplicate
+  calls, cancellations, navigation, and HTTP failures deliberately.
+- **Useful failure evidence** — when a rule breaks, the tool reduces the run
+  to the smallest case that still shows the problem and saves it for replay.
+- **Safe replay** — saved evidence checks that the browser and available tools
+  still match, so an old failure is not silently reinterpreted as a new one.
 
 ## CLI first. Console and agent access when needed.
 
