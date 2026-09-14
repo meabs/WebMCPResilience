@@ -24,6 +24,11 @@ The included Resilience Forge fixture is intentionally vulnerable. Run it to
 watch WebMCP Resilience find a human/tool race, minimize it, and save a
 replayable evidence bundle.
 
+[![Watch the WebMCP Resilience demo-race video](docs/assets/demo-race.gif)](docs/assets/demo-race.mp4)
+
+*A 13-second walkthrough of the included `demo-race` workflow. Select the
+preview to open the full video.*
+
 ```bash
 git clone https://github.com/meabs/WebMCPResilience.git
 cd WebMCPResilience
