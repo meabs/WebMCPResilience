@@ -14,14 +14,37 @@ Test whether your WebMCP app stays correct when people and tools act at the same
 
 </div>
 
-WebMCP Resilience checks whether a web app stays correct when a person and an
-AI tool use it at the same time. It adds familiar problems such as slow
+WebMCP Resilience is a developer test tool for WebMCP-enabled web applications.
+It checks whether the application stays correct when people, AI tools, and
+normal application events overlap. It adds familiar problems such as slow
 responses or repeated calls, then saves a small record you can rerun if it
 finds a bug.
 
-An **actor** is a person, AI tool, or system taking an action. An **invariant**
-is a rule the app must never break, such as “do not reserve more items than are
+For example, if one item is left, a person might click **Reserve** while an AI
+tool calls `reserve_inventory`. Each action can appear to work on its own while
+together they reserve two items. WebMCP Resilience runs that overlap
+deliberately and checks a rule such as “reserved items must never exceed items
 available.”
+
+You describe a scenario in reviewable YAML: the page to open, the people,
+tools, and system actors involved, the actions they take, the timing to try,
+and the rules that must hold. The runner performs those declared browser and
+tool actions in fresh browser sessions. It can introduce latency, timeouts,
+duplicate calls, cancellation, navigation, and selected HTTP failures; explore
+bounded orderings of simultaneous actions; and check observable application
+state, expected tool results, and optional tool-contract expectations.
+
+When a rule breaks, the tool reduces the case to the smallest declared scenario
+that reproduces the same failure. It saves portable, redacted evidence with the
+scenario, selected schedule, browser setup, tool inventory, state observations,
+trace, result, and replay instructions. A replay checks that the browser and
+tool contract are still compatible, so an old failure is not silently treated
+as the same bug after the application changes.
+
+An **actor** is a person, AI tool, or system taking an action. An **invariant**
+is a rule the app must never break. WebMCP Resilience tests application
+correctness once a tool is used; it does not assess whether an AI agent is
+clever enough to discover or choose the right tool.
 
 ## See it find and replay a failure
 
