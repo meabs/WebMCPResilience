@@ -1,0 +1,10 @@
+name: book-form-hang
+url: /book
+actors:
+  agent:
+    - at: 0ms
+      invoke: submit_booking
+      timeout_ms: 5000
+      args: {date: "2030-01-01", partySize: 2}
+result_invariants:
+  - results.submit_booking.OK == 1

@@ -88,3 +88,24 @@ async def test_cancel_targets_the_declared_tool_when_two_invocations_are_pending
     assert CancellationAdapter.cancelled == ["second"]
     first.cancel()
     await asyncio.gather(first, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_adversarial_cancellation_reliably_targets_each_matching_invocation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stress the public cancel action across fresh adversarial-style schedules."""
+    import asyncio
+
+    monkeypatch.setattr("webmcp_resilience.engine.runner.WebMCPAdapter", CancellationAdapter)
+    CancellationAdapter.cancelled = []
+    scenario = Scenario.model_validate({"name": "cancel-stress", "actors": {"agent": [{"cancel": "slow"}]}})
+    for index in range(25):
+        runner = ScenarioRunner(Page(), scenario, allow_mutations=True)
+        task = asyncio.create_task(asyncio.sleep(10))
+        invocation_id = f"slow-{index}"
+        runner.invocations = {invocation_id: task}
+        runner.invocation_names = {invocation_id: "slow"}
+        runner.adapter.cancel = CancellationAdapter.cancel.__get__(runner.adapter, type(runner.adapter))
+        await runner._execute("agent", scenario.actors["agent"][0])
+        await asyncio.gather(task, return_exceptions=True)
+        assert task.cancelled()
+    assert CancellationAdapter.cancelled == [f"slow-{index}" for index in range(25)]

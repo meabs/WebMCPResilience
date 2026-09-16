@@ -35,6 +35,16 @@ An `invoke` or `retry` can set `timeout_ms` to stop just that call. Otherwise,
 the configured `invoke_timeout_ms` applies (15 seconds by default). A timeout
 requests browser-side cancellation before the run reports the timeout.
 
+For example, give a known slow confirmation flow a tighter or looser budget
+without weakening the default for every other action:
+
+```yaml
+- at: 0ms
+  invoke: place_order
+  timeout_ms: 30000
+  args: {cartId: "test-cart"}
+```
+
 When discovery returns duplicate tool names, add `tool_origin` and/or
 `tool_frame` to the tool action. Unqualified duplicate names are rejected as
 ambiguous before execution.
@@ -48,6 +58,11 @@ invariants. It runs inside the page and must return an object.
 `final_invariants` for rules that only need to be true after the complete
 workflow, such as a record eventually reaching a completed state. Boolean
 literals may use either `true`/`false` or `True`/`False`.
+
+If the application publishes observable state on a later render, configure a
+small `state_settle_ms` in `.webmcp/config.yaml`. It delays only continuous
+invariant reads; `final_invariants` remain the preferred contract for an
+eventual completion state.
 
 ```yaml
 state_script: window.__app.getObservableState()

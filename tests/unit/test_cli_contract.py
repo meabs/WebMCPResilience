@@ -17,6 +17,22 @@ def test_demo_race_is_a_registered_cli_contract() -> None:
     assert "Resilience Forge" in result.output
 
 
+def test_init_from_url_writes_an_external_target_and_state_scaffold(tmp_path: Path) -> None:
+    result = CliRunner().invoke(
+        app, ["init", "--directory", str(tmp_path / ".webmcp"), "--from-url", "https://shop.example/checkout", "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    config = (tmp_path / ".webmcp" / "config.yaml").read_text()
+    assert "base_url: https://shop.example" in config
+    assert "state_script:" in config
+
+
+def test_init_from_url_rejects_a_non_http_target(tmp_path: Path) -> None:
+    result = CliRunner().invoke(app, ["init", "--directory", str(tmp_path / ".webmcp"), "--from-url", "file:///tmp/app"])
+    assert result.exit_code == 2
+    assert "http or https" in result.output
+
+
 @pytest.mark.parametrize(("flag", "expected"), [(None, False), ("--replay-allow-mutations", True)])
 def test_history_receives_cli_configured_replay_authority(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: str | None, expected: bool

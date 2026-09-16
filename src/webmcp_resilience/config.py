@@ -17,6 +17,9 @@ class Config(BaseModel):
     # useful for pinned fixtures and never retry a mutating invocation.
     webmcp_profile: Literal["auto", "native-object", "legacy-string"] = "auto"
     invoke_timeout_ms: int | None = Field(15_000, gt=0)
+    # Let reactive applications publish observable state before a continuous
+    # invariant reads it. Final invariants stay explicit workflow assertions.
+    state_settle_ms: int = Field(0, ge=0)
     tool_registration_grace_ms: int = Field(2_000, ge=0)
     # These hooks are explicit application-state boundaries.  They are only
     # evaluated when configured and are included in bundle evidence.

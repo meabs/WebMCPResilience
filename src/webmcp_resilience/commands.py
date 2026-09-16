@@ -181,6 +181,8 @@ def build_webmcp_compatibility_report(
     browser: dict[str, Any],
     inventory_before: list[dict[str, Any]] | None = None,
     inventory_error: str | None = None,
+    registration_grace_ms: int = 0,
+    inventory_checked_after_grace: bool = False,
     state_observation: StateObservation | None = None,
     include_contract_descriptions: bool = False,
 ) -> dict[str, Any]:
@@ -321,6 +323,14 @@ def build_webmcp_compatibility_report(
             "WebMCP is available but its inventory is empty. Check that registration ran, registerTool options/AbortSignal, origin-trial setup, and the registration grace period.",
             "tool_inventory.count", 0, title="WebMCP tool inventory is empty",
         ))
+        if inventory_checked_after_grace and registration_grace_ms:
+            findings.append(_finding(
+                "tool-registration-hung", "error",
+                "The WebMCP API is available but no tools registered after the configured grace period. "
+                "Inspect registration promises, AbortSignal handling, and page startup errors.",
+                "tool_inventory.registration", {"count": 0, "grace_ms": registration_grace_ms},
+                title="Tool registration appears hung",
+            ))
     if state_observation and state_observation.validation.get("valid") is False:
         findings.append(_finding(
             "state-observation-invalid", "error",
@@ -611,12 +621,14 @@ class CommandAPI:
             inventory_before: list[dict[str, Any]] = []
             inventory: list[dict[str, Any]] = []
             inventory_error: str | None = None
+            inventory_checked_after_grace = False
             if probe.get("api", {}).get("available") and probe.get("api", {}).get("getTools"):
                 try:
                     # Discovery is read-only. It never executes a page tool.
                     inventory_before = await adapter.get_tools()
                     if not inventory_before and self.config.tool_registration_grace_ms:
                         await asyncio.sleep(self.config.tool_registration_grace_ms / 1000)
+                        inventory_checked_after_grace = True
                     inventory = await adapter.get_tools()
                 except Exception as error:
                     inventory_error = str(error)
@@ -655,6 +667,11 @@ class CommandAPI:
                 "schema_valid": sum(_inventory_entry(tool, index)["schema_quality"] == "valid_object" for index, tool in enumerate(inventory)),
                 "annotations_present": sum(isinstance(tool.get("annotations"), dict) for tool in inventory),
                 "inventory_error": inventory_error,
+                "registration": {
+                    "grace_ms": self.config.tool_registration_grace_ms,
+                    "checked_after_grace": inventory_checked_after_grace,
+                    "hung_heuristic": bool(inventory_checked_after_grace and not inventory and not inventory_error),
+                },
             }
             browser_evidence = {
                 "name": self.config.browser,
@@ -671,6 +688,8 @@ class CommandAPI:
                 browser=browser_evidence,
                 inventory_before=inventory_before,
                 inventory_error=inventory_error,
+                registration_grace_ms=self.config.tool_registration_grace_ms,
+                inventory_checked_after_grace=inventory_checked_after_grace,
                 state_observation=state_observation,
                 include_contract_descriptions=self.config.tool_contract_include_descriptions,
             )
@@ -1154,7 +1173,7 @@ class CommandAPI:
                 # Setup/reset may register or withdraw tools.  Re-discover
                 # after applying it; the runner receives the same live
                 # descriptors that were used for contract validation.
-                runner = ScenarioRunner(client.page, scenario, self.config.state_script, self.config.from_origins, allow_mutations, base_url=self.config.base_url, webmcp_profile=self.config.webmcp_profile, invoke_timeout_ms=self.config.invoke_timeout_ms)
+                runner = ScenarioRunner(client.page, scenario, self.config.state_script, self.config.from_origins, allow_mutations, base_url=self.config.base_url, webmcp_profile=self.config.webmcp_profile, invoke_timeout_ms=self.config.invoke_timeout_ms, state_settle_ms=self.config.state_settle_ms)
                 # Discovery supplies the live compatibility contract. Validate
                 # and compare it before any scenario tool or UI action runs.
                 available_tools = await readiness.get_tools()
@@ -1284,6 +1303,7 @@ class CommandAPI:
                                     fresh.page, candidate, self.config.state_script, self.config.from_origins,
                                     allow_mutations, base_url=self.config.base_url,
                                     webmcp_profile=self.config.webmcp_profile, invoke_timeout_ms=self.config.invoke_timeout_ms,
+                                    state_settle_ms=self.config.state_settle_ms,
                                 )
                                 await candidate_runner.run(candidate_schedule)
                             except Exception as candidate_error:

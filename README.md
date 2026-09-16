@@ -66,6 +66,14 @@ python3 -m venv .venv
 .venv/bin/webmcp demo-race
 ```
 
+For an external staging target, bootstrap its local resilience configuration
+in one command, then replace the generated observable-state placeholder with
+your app's explicit state boundary:
+
+```bash
+.venv/bin/webmcp init --from-url https://staging.example.test/checkout
+```
+
 ```text
 Failed invariant: claims.active <= claims.capacity
 Observed state: {"claims": {"active": 2, "capacity": 1}}
@@ -107,6 +115,7 @@ WebMCP Resilience                              → Is the application resilient?
 | Test your own WebMCP app | [First project scenario](docs/getting-started.md#first-project-scenario) |
 | Add deterministic checks to CI | [CI pattern](docs/getting-started.md#ci-pattern) |
 | Define concurrency and fault scenarios | [Scenario reference](docs/scenarios-and-replay.md) |
+| Start from a common scenario | [Recipe library](examples/recipes/README.md) |
 | Give a coding agent controlled access | [Agent control and safety](docs/agent-control.md) |
 
 ## What you need before you start

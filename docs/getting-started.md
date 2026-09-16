@@ -14,6 +14,9 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -e '.[dev]'
 .venv/bin/playwright install chromium
 .venv/bin/webmcp init
+# Or target a reachable external test environment in one command. This writes
+# a safe observable-state placeholder for you to replace.
+.venv/bin/webmcp init --from-url https://staging.example.test/checkout
 ```
 
 Set the target and optional observable-state expression in
@@ -30,6 +33,8 @@ browser_args: ["--enable-features=WebMCPTesting"]
 # webmcp_profile: legacy-string  # auto | native-object
 # Stop a tool call that has not finished after 15 seconds (set null to disable).
 # invoke_timeout_ms: 15000
+# Let React/Vue-style observable state settle before *continuous* invariants.
+# state_settle_ms: 25
 # Optional backend reset/state contract:
 # reset_script: "await fetch('/test/reset', {method: 'POST'})"
 # initial_state: {claims: {active: 0, capacity: 1}}
@@ -54,6 +59,12 @@ If a tool never finishes, the runner stops it after `invoke_timeout_ms` and
 reports `tool_invoke_timeout`. This usually means a declarative tool is waiting
 for a user confirmation or another browser-side completion step; it is not
 automatically an application bug.
+
+Set `timeout_ms` on an individual `invoke` or `retry` when one action needs a
+different budget; it overrides `invoke_timeout_ms` only for that action. For
+reactive apps whose observable state lags a completed click or tool call, set
+`state_settle_ms` to a small explicit value before continuous invariants run.
+Use `final_invariants` for eventual, end-of-workflow assertions.
 
 ## First proof: the included race fixture
 
@@ -132,6 +143,16 @@ when a failure occurs.
 For an intentionally failing regression fixture, preserve the non-zero exit
 code and upload its bundle. Do not remove the evidence just to make a pipeline
 green.
+
+This repository includes a composite GitHub Action that performs preflight,
+runs a declared scenario, and uploads `.webmcp/runs/` when either step fails:
+
+```yaml
+- uses: ./.github/actions/webmcp-resilience
+  with:
+    scenario: .webmcp/scenarios/checkout-race.yaml
+    allow-mutations: "true" # only for an isolated test target
+```
 
 ## Troubleshooting
 

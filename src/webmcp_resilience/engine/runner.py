@@ -35,8 +35,23 @@ class ToolInvokeTimeout(TimeoutError):
         super().__init__(f"tool promise did not settle within {timeout_ms}ms")
 
 
+class NavigationDestroyedContextError(RuntimeError):
+    """A navigation invalidated the JavaScript execution context of a tool call."""
+
+    code = "navigation_destroyed_context"
+
+    def __init__(self, error: Exception) -> None:
+        super().__init__("tool invocation lost its browser execution context during navigation")
+        self.__cause__ = error
+
+
+def _is_navigation_destroyed(error: Exception) -> bool:
+    message = str(error).lower()
+    return "execution context was destroyed" in message or "cannot find context with specified id" in message
+
+
 class ScenarioRunner:
-    def __init__(self, page: Page, scenario: Scenario, state_script: str | None = None, from_origins: list[str] | None = None, allow_mutations: bool = False, *, base_url: str | None = None, webmcp_profile: str = "auto", invoke_timeout_ms: int | None = 15_000) -> None:
+    def __init__(self, page: Page, scenario: Scenario, state_script: str | None = None, from_origins: list[str] | None = None, allow_mutations: bool = False, *, base_url: str | None = None, webmcp_profile: str = "auto", invoke_timeout_ms: int | None = 15_000, state_settle_ms: int = 0) -> None:
         self.page, self.scenario = page, scenario
         self.adapter = WebMCPAdapter(page, state_script, from_origins, webmcp_profile)
         self.faults = build_effects(scenario.faults)
@@ -50,6 +65,7 @@ class ScenarioRunner:
         self.invocation_descriptors: dict[str, dict[str, Any]] = {}
         self.invocation_timeouts: dict[str, int | None] = {}
         self.invoke_timeout_ms = invoke_timeout_ms
+        self.state_settle_ms = state_settle_ms
         self.effective_dispatch: list[dict[str, Any]] = []
         self.background: list[asyncio.Task[Any]] = []
         self.failure: dict[str, Any] | None = None
@@ -419,6 +435,14 @@ class ScenarioRunner:
                               data={"outcome": "cancelled"})
             raise
         except Exception as error:
+            if _is_navigation_destroyed(error):
+                classified = NavigationDestroyedContextError(error)
+                self.recorder.add(actor, "tool.error", name=name, invocation_id=invocation_id,
+                                  data={"error": str(classified), "error_code": classified.code})
+                self.recorder.add(actor, "action.completed", name=name, invocation_id=invocation_id,
+                                  data={"outcome": "error", "error_type": type(classified).__name__,
+                                        "error_code": classified.code})
+                raise classified from error
             self.recorder.add(actor, "tool.error", name=name, invocation_id=invocation_id,
                               data={"error": str(error), "error_code": getattr(error, "code", None)})
             self.recorder.add(actor, "action.completed", name=name, invocation_id=invocation_id,
@@ -494,6 +518,9 @@ class ScenarioRunner:
         expressions = self.scenario.final_invariants if final else self.scenario.invariants
         if not expressions:
             return
+        if not final and self.state_settle_ms:
+            await self.page.wait_for_timeout(self.state_settle_ms)
+            self.recorder.add("system", "state.settled", data={"duration_ms": self.state_settle_ms})
         state = await self.adapter.get_state()
         self.recorder.add("system", "state.observed", state=state)
         for expression in expressions:

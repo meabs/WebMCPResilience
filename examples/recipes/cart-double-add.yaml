@@ -1,0 +1,12 @@
+name: cart-double-add
+url: /cart
+actors:
+  agent:
+    - at: 0ms
+      invoke: add_to_cart
+      args: {sku: "test-sku", quantity: 1}
+    - at: 0ms
+      retry: add_to_cart
+      args: {sku: "test-sku", quantity: 1}
+invariants:
+  - cart.quantity <= inventory.available

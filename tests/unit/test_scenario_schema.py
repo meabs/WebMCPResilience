@@ -2,7 +2,7 @@ import pytest
 import asyncio
 
 from webmcp_resilience.models.scenario import Fault, Scenario
-from webmcp_resilience.engine.runner import ScenarioRunner
+from webmcp_resilience.engine.runner import NavigationDestroyedContextError, ScenarioRunner
 
 
 class _Page:
@@ -101,3 +101,42 @@ async def test_ambiguous_selector_explains_how_to_fix_it() -> None:
     runner = ScenarioRunner(Page(), scenario)  # type: ignore[arg-type]
     with pytest.raises(RuntimeError, match="matched 4 elements.*nth-of-type"):
         await runner._ui("human", scenario.actors["human"][0])
+
+
+@pytest.mark.asyncio
+async def test_continuous_invariants_wait_for_configured_state_settle() -> None:
+    class Page(_Page):
+        waits: list[int] = []
+
+        async def wait_for_timeout(self, value: int) -> None:
+            self.waits.append(value)
+
+    class Adapter:
+        async def get_state(self):
+            return {"booking": {"complete": True}}
+
+    page = Page()
+    scenario = Scenario.model_validate({
+        "name": "react-settle", "actors": {"agent": [{"action": "wait", "value": "0"}]},
+        "invariants": ["booking.complete == true"],
+    })
+    runner = ScenarioRunner(page, scenario, state_settle_ms=25)  # type: ignore[arg-type]
+    runner.adapter = Adapter()  # type: ignore[assignment]
+    await runner._check_invariants("agent")
+    assert page.waits == [25]
+
+
+@pytest.mark.asyncio
+async def test_navigation_destroyed_context_has_a_stable_error_code() -> None:
+    class Adapter:
+        async def invoke_tool(self, *_args):
+            raise RuntimeError("Execution context was destroyed, most likely because of a navigation")
+
+    scenario = Scenario.model_validate({"name": "order-tracking", "actors": {"agent": [{"invoke": "track_order"}]}})
+    runner = ScenarioRunner(_Page(), scenario)  # type: ignore[arg-type]
+    runner.adapter = Adapter()  # type: ignore[assignment]
+    runner.invocation_descriptors["track"] = {}
+    with pytest.raises(NavigationDestroyedContextError) as raised:
+        await runner._invoke("agent", "track", "track_order", {})
+    assert raised.value.code == "navigation_destroyed_context"
+    assert runner.recorder.run.events[-1].data["error_code"] == "navigation_destroyed_context"

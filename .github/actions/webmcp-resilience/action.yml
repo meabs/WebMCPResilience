@@ -1,0 +1,33 @@
+name: WebMCP resilience
+description: Preflight and run one declared WebMCP resilience scenario, retaining portable evidence on failure.
+inputs:
+  scenario:
+    description: Path to the scenario YAML.
+    required: true
+  allow-mutations:
+    description: Pass --allow-mutations for an isolated test target.
+    required: false
+    default: "false"
+  adversarial:
+    description: Pass --adversarial to explore declared simultaneous schedules.
+    required: false
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - name: Preflight
+      shell: bash
+      run: webmcp preflight --ci --run-id preflight --json
+    - name: Run scenario
+      shell: bash
+      run: >-
+        webmcp run ${{ inputs.scenario }} --ci --run-id scenario --json
+        ${{ inputs.adversarial == 'true' && '--adversarial' || '' }}
+        ${{ inputs.allow-mutations == 'true' && '--allow-mutations' || '' }}
+    - name: Upload WebMCP evidence
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: webmcp-runs
+        path: .webmcp/runs/
+        if-no-files-found: warn

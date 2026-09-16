@@ -1,0 +1,9 @@
+name: declarative-navigate
+url: /
+actors:
+  human:
+    - at: 0ms
+      action: navigate
+      value: /checkout
+final_invariants:
+  - checkout.ready == true

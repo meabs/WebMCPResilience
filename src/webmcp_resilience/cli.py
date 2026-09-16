@@ -3,6 +3,7 @@ import asyncio
 import json
 import threading
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import typer
 from rich.console import Console
@@ -79,13 +80,27 @@ def _command_error(error: Exception, json_output: bool) -> None:
 
 
 @app.command()
-def init(directory: Path = Path(".webmcp"), json_output: bool = typer.Option(False, "--json")) -> None:
+def init(directory: Path = Path(".webmcp"), from_url: str | None = typer.Option(None, "--from-url", help="External http(s) target to scaffold."), json_output: bool = typer.Option(False, "--json")) -> None:
     """Initialize an isolated local project configuration."""
     try:
         (directory / "scenarios").mkdir(parents=True, exist_ok=True); (directory / "failures").mkdir(parents=True, exist_ok=True)
         config = directory / "config.yaml"
-        if not config.exists(): config.write_text("base_url: http://localhost:3000\nbrowser: chromium\nbrowser_args: []\n")
-        payload = {"schema_version": "1.0", "contract_version": "1.0", "engine_version": ENGINE_VERSION, "result": "initialized", "directory": str(directory)}
+        if from_url:
+            parsed = urlsplit(from_url)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise ValueError("--from-url must be an absolute http or https URL")
+            base_url = f"{parsed.scheme}://{parsed.netloc}"
+            template = (
+                f"base_url: {base_url}\n"
+                "browser: chromium\n"
+                "browser_args: []\n"
+                "# Replace this with the application's explicit observable-state boundary.\n"
+                "state_script: \"window.__webmcp_resilience_state?.() ?? {}\"\n"
+            )
+        else:
+            template = "base_url: http://localhost:3000\nbrowser: chromium\nbrowser_args: []\n"
+        if not config.exists(): config.write_text(template)
+        payload = {"schema_version": "1.0", "contract_version": "1.0", "engine_version": ENGINE_VERSION, "result": "initialized", "directory": str(directory), "from_url": from_url}
         print(json.dumps(payload, sort_keys=True)) if json_output else console.print(f"Initialized [bold]{directory}[/bold]")
     except Exception as error: _command_error(error, json_output)
 

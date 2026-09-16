@@ -1,0 +1,13 @@
+name: double-place-order
+url: /checkout
+actors:
+  agent:
+    - at: 0ms
+      invoke: place_order
+      args: {cartId: "test-cart"}
+  human:
+    - at: 0ms
+      action: click
+      selector: '[data-testid="place-order"]'
+final_invariants:
+  - orders.created <= 1

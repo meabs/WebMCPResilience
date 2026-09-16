@@ -73,6 +73,14 @@ def test_empty_inventory_is_reported_when_webmcp_is_available() -> None:
     assert report["summary"]["status"] == "unsupported"
 
 
+def test_empty_inventory_after_grace_is_classified_as_registration_hung() -> None:
+    report = build_webmcp_compatibility_report(
+        probe(), [], browser={}, registration_grace_ms=2_000, inventory_checked_after_grace=True
+    )
+    finding = next(item for item in report["findings"] if item["id"] == "tool-registration-hung")
+    assert finding["severity"] == "error"
+
+
 def test_command_preflight_never_invokes_a_page_tool(tmp_path: Path, monkeypatch) -> None:
     calls: list[str] = []
 

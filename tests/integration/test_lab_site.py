@@ -110,7 +110,33 @@ async def test_auto_profile_passes_string_arguments_to_a_native_shaped_host(lab_
         tools = await adapter.get_tools()
         assert tools[0]["argumentMode"] == "string"
         result = await adapter.invoke_tool("string_tool", {"value": "ok"}, "string-invocation")
-        assert result["code"] == "STRING"
+    assert result["code"] == "STRING"
+
+
+@pytest.mark.parametrize(("chrome_major", "expected_mode", "expected_code"), [
+    (151, "string", "STRING"),
+    (155, "object", "OBJECT"),
+])
+async def test_auto_profile_gate_is_pinned_to_chrome_151_and_155_fixtures(
+    lab_server: str, chrome_major: int, expected_mode: str, expected_code: str
+) -> None:
+    async with BrowserClient() as client:
+        assert client.page
+        await client.page.goto(lab_server)
+        await client.page.evaluate(f'''() => {{
+          Object.defineProperty(navigator, 'userAgent', {{configurable: true, value: 'Mozilla/5.0 Chrome/{chrome_major}.0.0.0 Safari/537.36'}});
+          const tool = {{name: 'versioned_tool', inputSchema: {{type: 'object'}}}};
+          document.modelContext = {{
+            async getTools() {{ return [tool]; }},
+            async executeTool(_tool, args) {{ return {{code: typeof args === '{'string' if expected_mode == 'string' else 'object'}' ? '{expected_code}' : 'WRONG'}}; }},
+          }};
+        }}''')
+        adapter = WebMCPAdapter(client.page)
+        await adapter.install()
+        tools = await adapter.get_tools()
+        assert tools[0]["argumentMode"] == expected_mode
+        result = await adapter.invoke_tool("versioned_tool", {"value": "ok"}, f"chrome-{chrome_major}")
+        assert result["code"] == expected_code
 
 
 async def test_auto_profile_preserves_string_arguments_for_compatibility_host(lab_server: str) -> None:
