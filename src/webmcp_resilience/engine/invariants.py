@@ -33,6 +33,12 @@ def _value(state: dict[str, Any], node: ast.AST) -> Any:
     if isinstance(node, ast.Constant):
         return node.value
     if isinstance(node, ast.Name):
+        if node.id == "true":
+            return True
+        if node.id == "false":
+            return False
+        if node.id == "null":
+            return None
         return state[node.id]
     if isinstance(node, ast.Attribute):
         value = _value(state, node.value)

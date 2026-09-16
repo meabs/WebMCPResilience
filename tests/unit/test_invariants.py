@@ -15,3 +15,9 @@ def test_rejects_failed_observed_state() -> None:
 def test_rejects_executable_expression() -> None:
     with pytest.raises(InvariantError):
         check("__import__('os').system('bad') == 1", {})
+
+
+def test_accepts_lowercase_boolean_literals() -> None:
+    check("booking.confirmed == true", {"booking": {"confirmed": True}})
+    check("booking.cancelled == false", {"booking": {"cancelled": False}})
+    check("booking.confirmed == False", {"booking": {"confirmed": False}})

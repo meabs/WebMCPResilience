@@ -44,6 +44,12 @@ def _browser_version(client: BrowserClient) -> str:
     return str(version() if callable(version) else version or "unknown")
 
 
+def _argument_mode(inventory: list[dict[str, Any]]) -> str | None:
+    """Return a single discovered argument encoding, or None when unknown/mixed."""
+    modes = {str(tool["argumentMode"]) for tool in inventory if tool.get("argumentMode")}
+    return next(iter(modes)) if len(modes) == 1 else None
+
+
 def _recorded_replay_config(config: Config, saved: RunBundle) -> Config:
     """Restore a bundle's explicit state boundary and target origin for replay."""
     updates: dict[str, str | None] = {}
@@ -307,6 +313,12 @@ def build_webmcp_compatibility_report(
         findings.append(_finding(
             "tool-inventory-error", "error", "Fix the WebMCP getTools implementation so the browser can expose a stable inventory.",
             "tool_inventory.error", inventory_error, title="Tool inventory could not be collected",
+        ))
+    elif api.get("available") and api.get("getTools") and not inventory:
+        findings.append(_finding(
+            "tool-inventory-empty", "error",
+            "WebMCP is available but its inventory is empty. Check that registration ran, registerTool options/AbortSignal, origin-trial setup, and the registration grace period.",
+            "tool_inventory.count", 0, title="WebMCP tool inventory is empty",
         ))
     if state_observation and state_observation.validation.get("valid") is False:
         findings.append(_finding(
@@ -602,6 +614,8 @@ class CommandAPI:
                 try:
                     # Discovery is read-only. It never executes a page tool.
                     inventory_before = await adapter.get_tools()
+                    if not inventory_before and self.config.tool_registration_grace_ms:
+                        await asyncio.sleep(self.config.tool_registration_grace_ms / 1000)
                     inventory = await adapter.get_tools()
                 except Exception as error:
                     inventory_error = str(error)
@@ -648,6 +662,7 @@ class CommandAPI:
                 "headless": headless,
                 "user_agent": environment["user_agent"],
                 "webmcp_profile": self.config.webmcp_profile,
+                "webmcp_argument_mode": _argument_mode(inventory),
             }
             report = build_webmcp_compatibility_report(
                 probe,
@@ -664,6 +679,7 @@ class CommandAPI:
                 browser_version=environment["version"],
                 headless=headless,
                 webmcp_profile=self.config.webmcp_profile,
+                webmcp_argument_mode=_argument_mode(inventory),
                 capability_fingerprint=fingerprint,
                 tool_inventory_fingerprint=report["inventory_contract"]["inventory_fingerprint"],
             )
@@ -674,7 +690,7 @@ class CommandAPI:
             bundle.inventory_contract = report["inventory_contract"]
             bundle.tool_contract_drift = report["tool_contract_drift"]
             bundle.result = {
-                "passed": bool(probe.get("api", {}).get("available")) and state_observation.validation.get("valid") is not False,
+                "passed": report["summary"]["status"] != "unsupported" and state_observation.validation.get("valid") is not False,
                 "summary": "WebMCP browser compatibility report",
                 "report_kind": report["report_kind"],
                 "report_version": report["report_version"],
@@ -751,7 +767,7 @@ class CommandAPI:
         unsupported = {key: value for key, value in required.model_dump().items() if SUPPORTED_COMPATIBILITY_GROUPS.get(key) != value}
         if unsupported:
             raise CommandError(f"scenario requires unsupported compatibility groups: {unsupported}")
-        for expression in [*scenario.invariants, *scenario.result_invariants]:
+        for expression in [*scenario.invariants, *scenario.final_invariants, *scenario.result_invariants]:
             try:
                 validate_syntax(expression)
             except InvariantError as error:
@@ -994,6 +1010,7 @@ class CommandAPI:
                   exploration_limit: int | None = None, exploration_budget_ms: int | None = None,
                   reduction_max_attempts: int | None = None, reduction_budget_ms: int | None = None,
                   expected_capability_fingerprint: str | None = None,
+                  expected_webmcp_argument_mode: str | None = None,
                   expected_tool_inventory_fingerprint: str | None = None,
                   expected_tool_inventory: list[dict[str, Any]] | None = None,
                   contract_include_descriptions: bool | None = None,
@@ -1095,12 +1112,14 @@ class CommandAPI:
                     "url": client.page.url,
                     "user_agent": probe.get("runtime", {}).get("userAgent"),
                     "webmcp_profile": self.config.webmcp_profile,
+                    "webmcp_argument_mode": None,
                 })
                 bundle.compatibility = Compatibility(
                     browser=self.config.browser,
                     browser_version=browser_version,
                     headless=headless,
                     webmcp_profile=self.config.webmcp_profile,
+                    webmcp_argument_mode=None,
                     capability_fingerprint=fingerprint,
                     groups=requirements,
                 )
@@ -1134,10 +1153,18 @@ class CommandAPI:
                 # Setup/reset may register or withdraw tools.  Re-discover
                 # after applying it; the runner receives the same live
                 # descriptors that were used for contract validation.
-                runner = ScenarioRunner(client.page, scenario, self.config.state_script, self.config.from_origins, allow_mutations, base_url=self.config.base_url, webmcp_profile=self.config.webmcp_profile)
+                runner = ScenarioRunner(client.page, scenario, self.config.state_script, self.config.from_origins, allow_mutations, base_url=self.config.base_url, webmcp_profile=self.config.webmcp_profile, invoke_timeout_ms=self.config.invoke_timeout_ms)
                 # Discovery supplies the live compatibility contract. Validate
                 # and compare it before any scenario tool or UI action runs.
                 available_tools = await readiness.get_tools()
+                bundle.compatibility.webmcp_argument_mode = _argument_mode(available_tools)
+                bundle.browser_environment["webmcp_argument_mode"] = bundle.compatibility.webmcp_argument_mode
+                if (expected_webmcp_argument_mode is not None
+                        and bundle.compatibility.webmcp_argument_mode != expected_webmcp_argument_mode):
+                    raise CommandError(
+                        "unsafe replay rejected: WebMCP argument encoding differs from the recorded run "
+                        f"({expected_webmcp_argument_mode!r} vs {bundle.compatibility.webmcp_argument_mode!r})"
+                    )
                 live_contract = build_inventory_contract(
                     available_tools,
                     include_descriptions=include_contract_descriptions,
@@ -1255,7 +1282,7 @@ class CommandAPI:
                                 candidate_runner = ScenarioRunner(
                                     fresh.page, candidate, self.config.state_script, self.config.from_origins,
                                     allow_mutations, base_url=self.config.base_url,
-                                    webmcp_profile=self.config.webmcp_profile,
+                                    webmcp_profile=self.config.webmcp_profile, invoke_timeout_ms=self.config.invoke_timeout_ms,
                                 )
                                 await candidate_runner.run(candidate_schedule)
                             except Exception as candidate_error:
@@ -1301,7 +1328,7 @@ class CommandAPI:
                 bundle.tool_contract_expectations["status"] = "failed"
                 bundle.tool_contract_expectations["passed"] = False
         bundle.execution["scheduler"]["effective_schedule_count"] = len(effective_schedules)
-        bundle.result = {"passed": last_error is None, "error": str(last_error) if last_error else None, "schedules": len(chosen), "requested_schedules": len(chosen), "effective_unique_schedules": len(effective_schedules), "seed": seed, "contract_version": bundle.schema_version, "engine_version": bundle.compatibility.engine_version,
+        bundle.result = {"passed": last_error is None, "error": str(last_error) if last_error else None, "error_code": getattr(last_error, "code", None) if last_error else None, "schedules": len(chosen), "requested_schedules": len(chosen), "effective_unique_schedules": len(effective_schedules), "seed": seed, "contract_version": bundle.schema_version, "engine_version": bundle.compatibility.engine_version,
                          "tool_inventory_fingerprint": bundle.compatibility.tool_inventory_fingerprint,
                          "tool_contract_drift": bundle.tool_contract_drift,
                          "tool_contract_replay_decision": bundle.tool_contract_replay_decision,
@@ -1417,6 +1444,7 @@ class CommandAPI:
                                 recorded_schedule=(saved.execution.get("scheduler", {}).get("selected_logical_schedule", saved.execution["schedule"])
                                                    if isinstance(saved.execution.get("scheduler"), dict) else saved.execution["schedule"]),
                                 expected_capability_fingerprint=saved.compatibility.capability_fingerprint,
+                                expected_webmcp_argument_mode=saved.compatibility.webmcp_argument_mode,
                                 expected_tool_inventory_fingerprint=saved.compatibility.tool_inventory_fingerprint,
                                 expected_tool_inventory=saved.tool_inventory,
                                 contract_include_descriptions=include_contract_descriptions,

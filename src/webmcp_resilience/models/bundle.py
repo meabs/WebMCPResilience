@@ -117,6 +117,7 @@ class Compatibility(BaseModel):
     browser_version: str | None = None
     headless: bool | None = None
     webmcp_profile: str = "auto"
+    webmcp_argument_mode: str | None = None
     capability_fingerprint: str | None = None
     tool_inventory_fingerprint: str | None = None
     groups: CompatibilityRequirements = Field(default_factory=CompatibilityRequirements.installed)

@@ -26,8 +26,10 @@ state_script: window.__app.getObservableState()
 # Native WebMCP example (verify this exact binary with `webmcp preflight`):
 browser_channel: chromium
 browser_args: ["--enable-features=WebMCPTesting"]
-# `auto` uses object arguments for a native host and JSON strings for the lab host.
-# webmcp_profile: auto  # native-object | legacy-string
+# `auto` uses the documented browser profile. Pin this when your browser differs.
+# webmcp_profile: legacy-string  # auto | native-object
+# Stop a tool call that has not finished after 15 seconds (set null to disable).
+# invoke_timeout_ms: 15000
 # Optional backend reset/state contract:
 # reset_script: "await fetch('/test/reset', {method: 'POST'})"
 # initial_state: {claims: {active: 0, capacity: 1}}
@@ -41,6 +43,17 @@ The bundled lab is a compatibility host; its tests do not establish native
 browser support. Use `preflight` against the exact browser binary, channel and
 flags you intend to support, then run and replay a scenario without the
 fixture before treating that profile as native evidence.
+
+If preflight says the tool inventory is empty, WebMCP may be present but the
+page has not registered its tools. Check registration code, `registerTool`
+options such as `AbortSignal`, and your browser's origin-trial setup. The
+runner waits two seconds for registration by default; set
+`tool_registration_grace_ms` if your test app needs longer.
+
+If a tool never finishes, the runner stops it after `invoke_timeout_ms` and
+reports `tool_invoke_timeout`. This usually means a declarative tool is waiting
+for a user confirmation or another browser-side completion step; it is not
+automatically an application bug.
 
 ## First proof: the included race fixture
 

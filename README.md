@@ -127,8 +127,10 @@ state_script: window.__app.getObservableState()
 # Optional: settings for a native WebMCP browser. Check them with `webmcp preflight`.
 browser_channel: chromium
 browser_args: ["--enable-features=WebMCPTesting"]
-# Leave this as `auto` in most cases. It chooses the right argument format.
-# webmcp_profile: auto  # native-object | legacy-string
+# `auto` uses the documented browser profile. Pin this when your browser differs.
+# webmcp_profile: legacy-string  # auto | native-object
+# Stop a tool call that has not finished after 15 seconds (set null to disable).
+# invoke_timeout_ms: 15000
 # Optional: reset a server-backed test app before each run.
 # reset_script: "await fetch('/test/reset', {method: 'POST'})"
 # initial_state: {claims: {active: 0, capacity: 1}}
@@ -146,6 +148,20 @@ flags you plan to use. Then run and replay a scenario without the lab fixture.
 Each saved bundle records the browser version, launch settings, argument
 profile, and available capabilities. This project does not claim protocol
 conformance.
+
+### Common setup problems
+
+- **A native tool rejects its arguments:** older Chrome WebMCP builds use JSON
+  strings. Set `webmcp_profile: legacy-string`. The saved bundle records the
+  argument mode and replay rejects a different one.
+- **Preflight finds no tools:** the page may be stuck while registering them.
+  Check its `registerTool` call, including options such as `AbortSignal`, and
+  increase `tool_registration_grace_ms` if registration is simply slow.
+- **A run stops with `tool_invoke_timeout`:** the tool did not finish within
+  `invoke_timeout_ms` (15 seconds by default). This often means a declarative
+  tool is waiting for a browser-side confirmation, rather than an app bug.
+- **A selector matches more than one element:** make it more specific, use
+  `:nth-of-type(n)`, or use a role-based selector.
 
 ## A complete workflow
 
@@ -198,6 +214,8 @@ faults:
     at: before_invoke
 invariants:
   - inventory.reserved <= inventory.available
+final_invariants:
+  - checkout.submitted == true
 ```
 
 For state-aware inputs, fault timing, result invariants, reduction, replay, and

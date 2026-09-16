@@ -66,6 +66,13 @@ def test_permission_origin_and_iframe_findings_are_deterministic() -> None:
     assert {"insecure-context", "permissions-policy-denied", "iframe-topology", "cross-origin-iframe", "origin-not-isolated"} <= ids
 
 
+def test_empty_inventory_is_reported_when_webmcp_is_available() -> None:
+    report = build_webmcp_compatibility_report(probe(), [], browser={})
+    finding = next(item for item in report["findings"] if item["id"] == "tool-inventory-empty")
+    assert finding["severity"] == "error"
+    assert report["summary"]["status"] == "unsupported"
+
+
 def test_command_preflight_never_invokes_a_page_tool(tmp_path: Path, monkeypatch) -> None:
     calls: list[str] = []
 

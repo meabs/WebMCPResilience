@@ -31,6 +31,10 @@ Each action has exactly one operation: `invoke`, `retry`, `cancel`, or a UI
 `action`. Supported UI actions are `click`, `fill`, `select`, `navigate`, and
 `wait`. Times are integer milliseconds such as `0ms` or `250ms`.
 
+An `invoke` or `retry` can set `timeout_ms` to stop just that call. Otherwise,
+the configured `invoke_timeout_ms` applies (15 seconds by default). A timeout
+requests browser-side cancellation before the run reports the timeout.
+
 When discovery returns duplicate tool names, add `tool_origin` and/or
 `tool_frame` to the tool action. Unqualified duplicate names are rejected as
 ambiguous before execution.
@@ -39,6 +43,11 @@ ambiguous before execution.
 
 `state_script` in `.webmcp/config.yaml` returns the object checked by state
 invariants. It runs inside the page and must return an object.
+
+`invariants` are checked after actions as well as at the end of the run. Use
+`final_invariants` for rules that only need to be true after the complete
+workflow, such as a record eventually reaching a completed state. Boolean
+literals may use either `true`/`false` or `True`/`False`.
 
 ```yaml
 state_script: window.__app.getObservableState()

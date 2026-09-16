@@ -13,10 +13,11 @@ class Config(BaseModel):
     state_script: str | None = None
     browser_args: list[str] = Field(default_factory=list)
     from_origins: list[str] = Field(default_factory=list)
-    # ``auto`` selects object arguments for native WebMCP and JSON strings for
-    # the bundled compatibility host, based on its preflight identity. The explicit profiles are useful for
-    # pinned contract fixtures and never retry a mutating invocation.
+    # ``auto`` uses the browser's documented profile. Explicit profiles are
+    # useful for pinned fixtures and never retry a mutating invocation.
     webmcp_profile: Literal["auto", "native-object", "legacy-string"] = "auto"
+    invoke_timeout_ms: int | None = Field(15_000, gt=0)
+    tool_registration_grace_ms: int = Field(2_000, ge=0)
     # These hooks are explicit application-state boundaries.  They are only
     # evaluated when configured and are included in bundle evidence.
     setup_script: str | None = None

@@ -8,10 +8,13 @@
   const argumentMode = (profile, host) => {
     if (profile === 'native-object') return 'object';
     if (profile === 'legacy-string') return 'string';
-    // ``auto`` follows the host identity established by the preflight probe.
-    // The bundled compatibility host retains its legacy JSON-string contract;
-    // every other exposed WebMCP host uses the native object contract.
-    return host?.__webmcpResilienceCompatibilityHost ? 'string' : 'object';
+    // Compatibility hosts and older/unknown browsers use the legacy string
+    // contract. Chrome deprecated string arguments from version 155, so use
+    // objects only from that documented transition onwards. Callers can pin a
+    // profile when testing another browser contract.
+    if (host?.__webmcpResilienceCompatibilityHost) return 'string';
+    const match = navigator.userAgent.match(/(?:Chrome|Chromium)\/(\d+)/);
+    return match && Number(match[1]) >= 155 ? 'object' : 'string';
   };
   window.__webmcp_resilience = {
     lifecycle: [],

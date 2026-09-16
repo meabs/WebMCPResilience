@@ -25,12 +25,15 @@ class TimedAction(BaseModel):
     # or frames.  They are evidence-qualified, not browser CSS selectors.
     tool_origin: str | None = None
     tool_frame: str | None = None
+    timeout_ms: int | None = Field(default=None, gt=0)
     args: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def exactly_one_operation(self) -> "TimedAction":
         if sum(value is not None for value in (self.invoke, self.retry, self.cancel, self.action)) != 1:
             raise ValueError("each action needs exactly one of invoke, retry, cancel, or action")
+        if self.timeout_ms is not None and not (self.invoke or self.retry):
+            raise ValueError("timeout_ms is only supported for invoke or retry actions")
         return self
 
     @property
@@ -97,6 +100,7 @@ class Scenario(BaseModel):
     actors: dict[str, list[TimedAction]]
     faults: list[Fault] = Field(default_factory=list)
     invariants: list[str] = Field(default_factory=list)
+    final_invariants: list[str] = Field(default_factory=list)
     state: StateProvider | None = None
     result_invariants: list[str] = Field(default_factory=list)
     tool_contracts: dict[str, ToolContractExpectation] = Field(default_factory=dict)

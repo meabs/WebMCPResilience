@@ -75,7 +75,7 @@ async def test_probe_classifies_a_native_shaped_contract_fixture(lab_server: str
         assert api["compatibilityHost"] is False
 
 
-async def test_auto_profile_passes_object_arguments_to_a_native_host(lab_server: str) -> None:
+async def test_explicit_native_object_profile_passes_object_arguments(lab_server: str) -> None:
     async with BrowserClient() as client:
         assert client.page
         await client.page.goto(lab_server)
@@ -86,12 +86,31 @@ async def test_auto_profile_passes_object_arguments_to_a_native_host(lab_server:
             async executeTool(_tool, args) { return {code: typeof args === 'object' && args.value === 'ok' ? 'OBJECT' : 'WRONG'}; },
           };
         }""")
-        adapter = WebMCPAdapter(client.page)
+        adapter = WebMCPAdapter(client.page, profile="native-object")
         await adapter.install()
         tools = await adapter.get_tools()
         assert tools[0]["argumentMode"] == "object"
         result = await adapter.invoke_tool("object_tool", {"value": "ok"}, "object-invocation")
         assert result["code"] == "OBJECT"
+
+
+async def test_auto_profile_passes_string_arguments_to_a_native_shaped_host(lab_server: str) -> None:
+    async with BrowserClient() as client:
+        assert client.page
+        await client.page.goto(lab_server)
+        await client.page.evaluate("""() => {
+          const tool = {name: 'string_tool', inputSchema: {type: 'object'}};
+          document.modelContext = {
+            async getTools() { return [tool]; },
+            async executeTool(_tool, args) { return {code: typeof args === 'string' && args === '{\\"value\\":\\"ok\\"}' ? 'STRING' : 'WRONG'}; },
+          };
+        }""")
+        adapter = WebMCPAdapter(client.page)
+        await adapter.install()
+        tools = await adapter.get_tools()
+        assert tools[0]["argumentMode"] == "string"
+        result = await adapter.invoke_tool("string_tool", {"value": "ok"}, "string-invocation")
+        assert result["code"] == "STRING"
 
 
 async def test_auto_profile_preserves_string_arguments_for_compatibility_host(lab_server: str) -> None:

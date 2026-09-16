@@ -26,8 +26,17 @@ from .invariants import InvariantError, check
 from .state import observe, resolve
 
 
+class ToolInvokeTimeout(TimeoutError):
+    """A tool promise did not settle within the configured execution budget."""
+
+    code = "tool_invoke_timeout"
+
+    def __init__(self, timeout_ms: int) -> None:
+        super().__init__(f"tool promise did not settle within {timeout_ms}ms")
+
+
 class ScenarioRunner:
-    def __init__(self, page: Page, scenario: Scenario, state_script: str | None = None, from_origins: list[str] | None = None, allow_mutations: bool = False, *, base_url: str | None = None, webmcp_profile: str = "auto") -> None:
+    def __init__(self, page: Page, scenario: Scenario, state_script: str | None = None, from_origins: list[str] | None = None, allow_mutations: bool = False, *, base_url: str | None = None, webmcp_profile: str = "auto", invoke_timeout_ms: int | None = 15_000) -> None:
         self.page, self.scenario = page, scenario
         self.adapter = WebMCPAdapter(page, state_script, from_origins, webmcp_profile)
         self.faults = build_effects(scenario.faults)
@@ -39,6 +48,8 @@ class ScenarioRunner:
         self.invocations: dict[str, asyncio.Task[Any]] = {}
         self.invocation_names: dict[str, str] = {}
         self.invocation_descriptors: dict[str, dict[str, Any]] = {}
+        self.invocation_timeouts: dict[str, int | None] = {}
+        self.invoke_timeout_ms = invoke_timeout_ms
         self.effective_dispatch: list[dict[str, Any]] = []
         self.background: list[asyncio.Task[Any]] = []
         self.failure: dict[str, Any] | None = None
@@ -137,6 +148,7 @@ class ScenarioRunner:
             if isinstance(outcome, Exception):
                 raise outcome
         await self._check_invariants("system")
+        await self._check_invariants("system", final=True)
         for expression in self.scenario.result_invariants:
             check(expression, {"results": self.result_counts})
             self.recorder.add("system", "result_invariant.pass", data={"expression": expression, "results": self.result_counts})
@@ -277,6 +289,7 @@ class ScenarioRunner:
             invocation_id = str(uuid.uuid4())
             self.invocation_names[invocation_id] = name
             self.invocation_descriptors[invocation_id] = descriptor
+            self.invocation_timeouts[invocation_id] = action.timeout_ms
             self.recorder.add(actor, "action.requested", name=name, invocation_id=invocation_id,
                               data={"operation": event, "args": arguments})
             self.recorder.add(actor, event, name=name, invocation_id=invocation_id, data={"args": arguments})
@@ -354,26 +367,34 @@ class ScenarioRunner:
                     await asyncio.sleep(fault.duration_ms / 1000)
                     self.recorder.add(actor, "scheduler.yield", data={"point": "after_latency", "tool": name})
                     await asyncio.sleep(0)
-            timeout_ms = next((value for fault in self.faults if self._fault_due(fault, name, "before_invoke") and (value := timeout_for(fault, name)) is not None), None)
-            if prestarted:
-                result = await self.adapter.await_started_tool(invocation_id)
-            elif timeout_ms is not None:
-                self.recorder.add("system", "fault.injected", name="timeout", data={"tool": name, "duration_ms": timeout_ms})
+            fault_timeout_ms = next((value for fault in self.faults if self._fault_due(fault, name, "before_invoke") and (value := timeout_for(fault, name)) is not None), None)
+            action_timeout_ms = self.invocation_timeouts.get(invocation_id)
+            timeout_ms = (
+                fault_timeout_ms if fault_timeout_ms is not None else
+                action_timeout_ms if action_timeout_ms is not None else
+                self.invoke_timeout_ms
+            )
+            invocation = (
+                self.adapter.await_started_tool(invocation_id)
+                if prestarted else
+                self._invoke_adapter(name, args, invocation_id, self.invocation_descriptors.get(invocation_id, {}))
+            )
+            if timeout_ms is not None:
+                if fault_timeout_ms is not None:
+                    self.recorder.add("system", "fault.injected", name="timeout", data={"tool": name, "duration_ms": timeout_ms})
                 try:
-                    result = await asyncio.wait_for(
-                        self._invoke_adapter(name, args, invocation_id, self.invocation_descriptors.get(invocation_id, {})),
-                        timeout_ms / 1000,
-                    )
+                    result = await asyncio.wait_for(invocation, timeout_ms / 1000)
                 except asyncio.TimeoutError:
                     # Cancelling the Python wait alone does not establish what
                     # happened in the browser.  Send the same invocation's
                     # AbortSignal before exposing the timeout to the caller.
                     await self.adapter.cancel(invocation_id)
                     self.recorder.add(actor, "tool.timeout", name=name, invocation_id=invocation_id,
-                                      data={"duration_ms": timeout_ms, "browser_abort_requested": True})
-                    raise
+                                      data={"duration_ms": timeout_ms, "browser_abort_requested": True,
+                                            "source": "fault" if fault_timeout_ms is not None else "action" if action_timeout_ms is not None else "config"})
+                    raise ToolInvokeTimeout(timeout_ms)
             else:
-                result = await self._invoke_adapter(name, args, invocation_id, self.invocation_descriptors.get(invocation_id, {}))
+                result = await invocation
             if isinstance(result, str):
                 try: result = json.loads(result)
                 except ValueError: pass
@@ -398,9 +419,11 @@ class ScenarioRunner:
                               data={"outcome": "cancelled"})
             raise
         except Exception as error:
-            self.recorder.add(actor, "tool.error", name=name, invocation_id=invocation_id, data={"error": str(error)})
+            self.recorder.add(actor, "tool.error", name=name, invocation_id=invocation_id,
+                              data={"error": str(error), "error_code": getattr(error, "code", None)})
             self.recorder.add(actor, "action.completed", name=name, invocation_id=invocation_id,
-                              data={"outcome": "error", "error_type": type(error).__name__})
+                              data={"outcome": "error", "error_type": type(error).__name__,
+                                    "error_code": getattr(error, "code", None)})
             raise
 
     async def _cancel_after_yield(self, invocation_id: str, name: str) -> None:
@@ -439,14 +462,25 @@ class ScenarioRunner:
         elif action.action == "navigate":
             await self.page.goto(self._navigation_target(action.value) or "")
         elif action.action == "click":
-            await self.page.locator(action.selector or "").click()
+            await (await self._single_locator(action)).click()
         elif action.action == "fill":
-            await self.page.locator(action.selector or "").fill(action.value or "")
+            await (await self._single_locator(action)).fill(action.value or "")
         elif action.action == "select":
-            await self.page.locator(action.selector or "").select_option(action.value or "")
+            await (await self._single_locator(action)).select_option(action.value or "")
         else:
             raise RuntimeError(f"unsupported UI action {action.action!r}")
         self.recorder.add(actor, f"ui.{action.action}", data=action.model_dump(exclude_none=True))
+
+    async def _single_locator(self, action: TimedAction) -> Any:
+        selector = action.selector or ""
+        locator = self.page.locator(selector)
+        count = await locator.count()
+        if count != 1:
+            raise RuntimeError(
+                f"selector {selector!r} matched {count} elements; expected exactly 1. "
+                "Use a more specific selector, :nth-of-type(n), or a role-based locator."
+            )
+        return locator
 
     def _navigation_target(self, value: str | None) -> str | None:
         if value is None or self.base_url is None:
@@ -456,18 +490,19 @@ class ScenarioRunner:
         # was checked rather than a browser-normalized relative reference.
         return resolve_navigation_url(value, self.base_url)
 
-    async def _check_invariants(self, actor: str) -> None:
-        if not self.scenario.invariants:
+    async def _check_invariants(self, actor: str, *, final: bool = False) -> None:
+        expressions = self.scenario.final_invariants if final else self.scenario.invariants
+        if not expressions:
             return
         state = await self.adapter.get_state()
         self.recorder.add("system", "state.observed", state=state)
-        for expression in self.scenario.invariants:
+        for expression in expressions:
             try:
                 check(expression, state)
-                self.recorder.add("system", "invariant.pass", data={"expression": expression}, state=state)
+                self.recorder.add("system", "invariant.pass", data={"expression": expression, "phase": "final" if final else "continuous"}, state=state)
             except (InvariantError, KeyError) as error:
                 self.failure = {"expression": expression, "observed": state, "error": str(error)}
-                self.recorder.add("system", "invariant.fail", data={"expression": expression, "error": str(error)}, state=state)
+                self.recorder.add("system", "invariant.fail", data={"expression": expression, "error": str(error), "phase": "final" if final else "continuous"}, state=state)
                 raise InvariantError(str(error)) from error
 
     def write_failure(self, destination: Path, schedule: list[dict[str, Any]] | None = None, *, run_id: str, requirements: dict[str, str]) -> Path:
