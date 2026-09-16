@@ -56,7 +56,7 @@ async def test_preflight_probes_chromium_tools_permissions_policy(lab_server: st
         assert policy["modelContextAllowed"] is True
 
 
-async def test_preflight_recognises_document_model_context_as_native(lab_server: str) -> None:
+async def test_probe_classifies_a_native_shaped_contract_fixture(lab_server: str) -> None:
     async with BrowserClient() as client:
         assert client.page
         await client.page.goto(lab_server)
@@ -73,3 +73,32 @@ async def test_preflight_recognises_document_model_context_as_native(lab_server:
         assert api["mode"] == "native"
         assert api["native"] is True
         assert api["compatibilityHost"] is False
+
+
+async def test_auto_profile_passes_object_arguments_to_a_native_host(lab_server: str) -> None:
+    async with BrowserClient() as client:
+        assert client.page
+        await client.page.goto(lab_server)
+        await client.page.evaluate("""() => {
+          const tool = {name: 'object_tool', inputSchema: {type: 'object', properties: {value: {type: 'string'}}}};
+          document.modelContext = {
+            async getTools() { return [tool]; },
+            async executeTool(_tool, args) { return {code: typeof args === 'object' && args.value === 'ok' ? 'OBJECT' : 'WRONG'}; },
+          };
+        }""")
+        adapter = WebMCPAdapter(client.page)
+        await adapter.install()
+        tools = await adapter.get_tools()
+        assert tools[0]["argumentMode"] == "object"
+        result = await adapter.invoke_tool("object_tool", {"value": "ok"}, "object-invocation")
+        assert result["code"] == "OBJECT"
+
+
+async def test_auto_profile_preserves_string_arguments_for_compatibility_host(lab_server: str) -> None:
+    async with BrowserClient() as client:
+        assert client.page
+        await client.page.goto(lab_server)
+        adapter = WebMCPAdapter(client.page)
+        await adapter.install()
+        tools = await adapter.get_tools()
+        assert tools[0]["argumentMode"] == "string"

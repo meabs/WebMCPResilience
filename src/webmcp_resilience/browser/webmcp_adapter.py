@@ -12,8 +12,11 @@ class WebMCPUnavailable(RuntimeError):
 class WebMCPAdapter:
     """The sole browser-facing WebMCP boundary used by the Python engine."""
 
-    def __init__(self, page: Page, state_script: str | None = None, from_origins: list[str] | None = None) -> None:
-        self.page, self.state_script, self.from_origins = page, state_script, from_origins or []
+    def __init__(self, page: Page, state_script: str | None = None, from_origins: list[str] | None = None,
+                 profile: str = "auto") -> None:
+        if profile not in {"auto", "native-object", "legacy-string"}:
+            raise ValueError(f"unsupported WebMCP profile: {profile}")
+        self.page, self.state_script, self.from_origins, self.profile = page, state_script, from_origins or [], profile
 
     async def install(self) -> None:
         source = Path(__file__).with_name("adapter.js").read_text()
@@ -21,7 +24,10 @@ class WebMCPAdapter:
 
     async def get_tools(self) -> list[dict[str, Any]]:
         try:
-            return await self.page.evaluate("origins => window.__webmcp_resilience.getTools(origins)", self.from_origins)
+            return await self.page.evaluate(
+                "([origins, profile]) => window.__webmcp_resilience.getTools(origins, profile)",
+                [self.from_origins, self.profile],
+            )
         except Exception as error:
             raise WebMCPUnavailable(str(error)) from error
 
@@ -36,13 +42,18 @@ class WebMCPAdapter:
                 raise WebMCPUnavailable(f"WebMCP tools were not registered before timeout: {missing}")
             await asyncio.sleep(0.05)
 
-    async def invoke_tool(self, name: str, args: dict[str, Any], invocation_id: str) -> Any:
+    async def invoke_tool(self, name: str, args: dict[str, Any], invocation_id: str,
+                          descriptor: dict[str, Any] | None = None) -> Any:
         try:
-            return await self.page.evaluate("([name, args, id]) => window.__webmcp_resilience.invokeTool(name, args, id)", [name, args, invocation_id])
+            return await self.page.evaluate(
+                "([name, args, id, handle, profile]) => window.__webmcp_resilience.invokeTool(name, args, id, handle, profile)",
+                [name, args, invocation_id, (descriptor or {}).get("handleId"), self.profile],
+            )
         except Exception as error:
             raise RuntimeError(f"WebMCP tool {name!r} failed: {error}") from error
 
-    async def start_tool(self, name: str, args: dict[str, Any], invocation_id: str) -> None:
+    async def start_tool(self, name: str, args: dict[str, Any], invocation_id: str,
+                         descriptor: dict[str, Any] | None = None) -> None:
         """Start a tool in the page without holding the Playwright command open.
 
         This is the browser-side handoff used by same-offset actor groups. The
@@ -51,8 +62,8 @@ class WebMCPAdapter:
         """
         try:
             await self.page.evaluate(
-                "([name, args, id]) => window.__webmcp_resilience.startTool(name, args, id)",
-                [name, args, invocation_id],
+                "([name, args, id, handle, profile]) => window.__webmcp_resilience.startTool(name, args, id, handle, profile)",
+                [name, args, invocation_id, (descriptor or {}).get("handleId"), self.profile],
             )
         except Exception as error:
             raise RuntimeError(f"WebMCP tool {name!r} failed to start: {error}") from error

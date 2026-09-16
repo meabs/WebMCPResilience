@@ -65,6 +65,7 @@ def contract_page(*, quantity_required: bool) -> str:
     return f"""<!doctype html><html><body><script type="module">
 const tools = [];
 document.modelContext = {{
+  __webmcpResilienceCompatibilityHost: true,
   async registerTool(tool) {{ tools.push(tool); }},
   async getTools() {{ return tools; }},
   async executeTool(tool, json) {{ return tool.execute(JSON.parse(json)); }},

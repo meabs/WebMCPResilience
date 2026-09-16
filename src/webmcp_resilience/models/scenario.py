@@ -21,6 +21,10 @@ class TimedAction(BaseModel):
     action: Literal["click", "fill", "select", "navigate", "wait"] | None = None
     selector: str | None = None
     value: str | None = None
+    # Optional selectors for duplicate names returned from different origins
+    # or frames.  They are evidence-qualified, not browser CSS selectors.
+    tool_origin: str | None = None
+    tool_frame: str | None = None
     args: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -98,3 +102,7 @@ class Scenario(BaseModel):
     tool_contracts: dict[str, ToolContractExpectation] = Field(default_factory=dict)
     compatibility: dict[str, Any] = Field(default_factory=lambda: {"schema": "webmcp-resilience/scenario-1", "requires": {"scenario": "1", "fault_model": "1", "invariant_model": "1", "trace_model": "1", "browser_webmcp_adapter": "1"}})
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # Same-actor order is preserved by exploration by default.  Opting into
+    # permutations is an explicit scenario declaration because it changes the
+    # meaning of a user-authored schedule.
+    allow_reordering: bool = False

@@ -31,6 +31,10 @@ Each action has exactly one operation: `invoke`, `retry`, `cancel`, or a UI
 `action`. Supported UI actions are `click`, `fill`, `select`, `navigate`, and
 `wait`. Times are integer milliseconds such as `0ms` or `250ms`.
 
+When discovery returns duplicate tool names, add `tool_origin` and/or
+`tool_frame` to the tool action. Unqualified duplicate names are rejected as
+ambiguous before execution.
+
 ## State: two explicit mechanisms
 
 `state_script` in `.webmcp/config.yaml` returns the object checked by state
@@ -102,21 +106,38 @@ Fault timing is explicit. Unsupported timing combinations are validation errors.
 declared actions in fresh browser sessions. The selected schedule and seed are
 saved to the run bundle.
 
+Generation is hard-bounded by `exploration_limit` and
+`exploration_budget_ms` in `.webmcp/config.yaml`, or by the matching
+`webmcp run` options. The bundle records candidates examined and whether the
+budget was exhausted. Each actor's authored order is preserved unless the
+scenario sets `allow_reordering: true`.
+
 For a same-offset group, eligible WebMCP tool promises are started in page
 context before the runner sends the accompanying UI action. That allows the UI
 to begin before the tool result is awaited. Playwright page commands remain
 transport-serialised, so the promise is **logical actor concurrency**, not a
 claim of sub-frame, CDP-level, or microtask-level control.
 
-The bundle records requested offsets, selected schedule, seed, and trace event
+The bundle records requested offsets, requested/dispatched/completed action
+events, effective dispatch modes, selected schedule, seed, and trace event
 timestamps. Replay validates compatibility, then uses the recorded logical
-schedule; it does not re-roll exploration.
+schedule; it does not re-roll exploration. A schedule count is therefore
+reported together with the number of unique effective dispatches actually
+observed.
 
 ## Failure reduction and replay
 
 When a run fails, the reducer removes declared actions only when a fresh browser
-session still reproduces the failure. It does not edit traces, substitute data,
-or guess new arguments.
+session still reproduces the same stable failure signature (invariant/result
+assertion, tool, and error identity). Harness, policy, and unrelated errors do
+not count. Reduction is bounded by `reduction_max_attempts` and
+`reduction_budget_ms`; the report says when either budget is exhausted. It does
+not edit traces, substitute data, or guess new arguments.
+
+Browser freshness does not reset a backend. For server-backed targets,
+configure explicit `reset_script` and/or `setup_script` hooks plus
+`initial_state`; hook application and the initial-state check are recorded in
+the bundle, and replay rejects a missing required hook.
 
 ```bash
 .venv/bin/webmcp replay .webmcp/runs/<run-id>/bundle.json --ci --json

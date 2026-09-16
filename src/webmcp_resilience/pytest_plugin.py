@@ -9,9 +9,9 @@ from .config import load_config
 async def webmcp():
     """Yield an adapter for the live app configured in `.webmcp/config.yaml`."""
     config = load_config()
-    async with BrowserClient(config.browser, args=config.browser_args) as client:
+    async with BrowserClient(config.browser, args=config.browser_args, channel=config.browser_channel) as client:
         assert client.page
         await client.page.goto(config.base_url)
-        adapter = WebMCPAdapter(client.page, config.state_script, config.from_origins)
+        adapter = WebMCPAdapter(client.page, config.state_script, config.from_origins, config.webmcp_profile)
         await adapter.install()
         yield adapter

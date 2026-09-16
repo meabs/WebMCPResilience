@@ -2,9 +2,9 @@
 
 # WebMCP Resilience
 
-**Find the race before an agent finds it in production.**
+**Find timing bugs before users do.**
 
-Deterministic resilience testing for WebMCP web apps.
+Test whether your WebMCP app stays correct when people and tools act at the same time.
 
 [Documentation](#start-here) · [Example fixture](examples/resilience-forge) · [Architecture](docs/architecture.md) · [Where it fits](docs/comparison.md)
 
@@ -19,9 +19,9 @@ AI tool use it at the same time. It adds familiar problems such as slow
 responses or repeated calls, then saves a small record you can rerun if it
 finds a bug.
 
-*Two small terms: an **actor** is the person, AI tool, or system taking an
-action; an **invariant** is a rule the app must never break, such as “do not
-reserve more items than are available.”*
+An **actor** is a person, AI tool, or system taking an action. An **invariant**
+is a rule the app must never break, such as “do not reserve more items than are
+available.”
 
 ## See it find and replay a failure
 
@@ -86,9 +86,9 @@ WebMCP Resilience                              → Is the application resilient?
 | Define concurrency and fault scenarios | [Scenario reference](docs/scenarios-and-replay.md) |
 | Give a coding agent controlled access | [Agent control and safety](docs/agent-control.md) |
 
-## What your app needs
+## What you need before you start
 
-Before writing a scenario, have these four things:
+Before you write a scenario, make sure you have:
 
 1. A page that registers WebMCP tools through `document.modelContext`.
 2. A `base_url` reachable from Playwright.
@@ -101,33 +101,41 @@ Before writing a scenario, have these four things:
 base_url: http://localhost:3000
 browser: chromium
 state_script: window.__app.getObservableState()
-# Chromium 151 native WebMCP:
+# Optional: settings for a native WebMCP browser. Check them with `webmcp preflight`.
 browser_channel: chromium
 browser_args: ["--enable-features=WebMCPTesting"]
+# Leave this as `auto` in most cases. It chooses the right argument format.
+# webmcp_profile: auto  # native-object | legacy-string
+# Optional: reset a server-backed test app before each run.
+# reset_script: "await fetch('/test/reset', {method: 'POST'})"
+# initial_state: {claims: {active: 0, capacity: 1}}
 ```
 
-`state_script` is the declared state boundary. The framework does not silently
-scrape DOM text, network traffic, or hidden application state.
+`state_script` tells WebMCP Resilience exactly what app state to check. It does
+not guess from page text, network traffic, or hidden browser state.
 
-On Chromium 151, native `document.modelContext` requires
-`--enable-features=WebMCPTesting` for a real HTTP(S) page (also exposed by
-`chrome://flags/#enable-webmcp-testing`). Use `browser_channel: chromium` to
-select the full Chromium binary; Playwright's default headless shell does not
-expose this experimental API. The included lab supplies a compatibility host,
-so its demo works without the flag; preflight reports which host is active.
+The included lab works everywhere supported by Playwright because it uses a
+compatibility host. That is useful for local tests, but it does not prove that
+a browser has native WebMCP support.
+
+To test a native browser, run `preflight` with the exact browser, channel, and
+flags you plan to use. Then run and replay a scenario without the lab fixture.
+Each saved bundle records the browser version, launch settings, argument
+profile, and available capabilities. This project does not claim protocol
+conformance.
 
 ## A complete workflow
 
 ```bash
-# Non-mutating browser and WebMCP readiness evidence.
+# Check that the browser and WebMCP tools are ready. This does not change app state.
 .venv/bin/webmcp preflight --ci --json
 
-# Validate a scenario, then execute seeded schedules in fresh sessions.
+# Check the scenario, then run it with repeatable timing in fresh browser sessions.
 .venv/bin/webmcp validate .webmcp/scenarios/checkout-race.yaml --json
 .venv/bin/webmcp run .webmcp/scenarios/checkout-race.yaml \
   --ci --adversarial --seed 7 --json
 
-# Replay a saved failure or compare portable evidence without a browser.
+# Replay a saved failure, or compare two saved runs without opening a browser.
 .venv/bin/webmcp replay .webmcp/runs/<run-id>/bundle.json --json
 # Require the original fingerprint exactly, including safe compatible drift.
 .venv/bin/webmcp replay .webmcp/runs/<run-id>/bundle.json --strict-tool-contracts --json

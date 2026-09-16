@@ -5,13 +5,30 @@
     if (!value) throw new Error("WebMCP is unavailable: document.modelContext was not exposed by this browser/page.");
     return value;
   };
+  const argumentMode = (profile, host) => {
+    if (profile === 'native-object') return 'object';
+    if (profile === 'legacy-string') return 'string';
+    // ``auto`` follows the host identity established by the preflight probe.
+    // The bundled compatibility host retains its legacy JSON-string contract;
+    // every other exposed WebMCP host uses the native object contract.
+    return host?.__webmcpResilienceCompatibilityHost ? 'string' : 'object';
+  };
   window.__webmcp_resilience = {
     lifecycle: [],
     pendingInvocations: new Map(),
-    async getTools(fromOrigins = []) {
+    toolHandles: new Map(),
+    async getTools(fromOrigins = [], profile = 'auto') {
+      this.defaultOrigins = [...fromOrigins];
       const options = fromOrigins.length ? { fromOrigins } : undefined;
-      const tools = await requireContext().getTools(options);
-      return Array.from(tools, tool => ({
+      const host = requireContext();
+      const tools = await host.getTools(options);
+      // Resolve once from the selected profile/host; never retry a mutating
+      // call using a second argument encoding.
+      const selectedArgumentMode = argumentMode(profile, host);
+      return Array.from(tools, (tool, index) => {
+        const handleId = `${location.origin}::${window === window.top ? 'top' : location.href}::${tool.name}::${index}`;
+        this.toolHandles.set(handleId, tool);
+        return {
         name: tool.name,
         description: tool.description,
         inputSchema: typeof tool.inputSchema === 'string' ? JSON.parse(tool.inputSchema) : tool.inputSchema,
@@ -19,24 +36,36 @@
         annotations: tool.annotations,
         // Explicit scenario expectations may validate this declaration. It is
         // evidence only and is not part of the default compatibility hash.
-        semanticVersion: tool.semanticVersion
-      }));
+        semanticVersion: tool.semanticVersion,
+        handleId,
+        identity: { handleId, name: tool.name, origin: location.origin, frame: window === window.top ? 'top' : location.href },
+        argumentMode: selectedArgumentMode,
+      };
+      });
     },
-    async invokeTool(name, args, invocationId) {
+    async invokeTool(name, args, invocationId, handleId = null, profile = 'auto') {
       const host = requireContext();
-      const tool = (await host.getTools()).find(candidate => candidate.name === name);
+      let tool = handleId ? this.toolHandles.get(handleId) : null;
+      if (!tool) {
+        const discovered = await this.getTools(this.defaultOrigins || [], profile);
+        const matches = discovered.filter(candidate => candidate.name === name);
+        if (matches.length !== 1) throw new Error(matches.length ? `WebMCP tool ${name} is ambiguous; use its discovered handle.` : `WebMCP tool not discovered: ${name}`);
+        tool = this.toolHandles.get(matches[0].handleId);
+      }
       if (!tool) throw new Error(`WebMCP tool not discovered: ${name}`);
       const controller = new AbortController();
       this.controllers.set(invocationId, controller);
       try {
-        return await host.executeTool(tool, JSON.stringify(args ?? {}), { signal: controller.signal });
+        const mode = argumentMode(profile, host);
+        const input = mode === 'object' ? (args ?? {}) : JSON.stringify(args ?? {});
+        return await host.executeTool(tool, input, { signal: controller.signal });
       } finally {
         this.controllers.delete(invocationId);
       }
     },
-    startTool(name, args, invocationId) {
+    startTool(name, args, invocationId, handleId = null, profile = 'auto') {
       if (this.pendingInvocations.has(invocationId)) throw new Error(`WebMCP invocation already started: ${invocationId}`);
-      const pending = this.invokeTool(name, args, invocationId);
+      const pending = this.invokeTool(name, args, invocationId, handleId, profile);
       // A rejected promise is intentionally retained for awaitTool(), but a
       // detached browser-side promise must also not become an unhandled error.
       pending.catch(() => {});

@@ -5,6 +5,17 @@ on:
   pull_request:
 
 jobs:
+  clean-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip wheel . --no-deps --wheel-dir /tmp/webmcp-wheel
+      - run: python -m venv /tmp/webmcp-clean
+      - run: /tmp/webmcp-clean/bin/python -m pip install /tmp/webmcp-wheel/*.whl
+      - run: cd /tmp && /tmp/webmcp-clean/bin/webmcp --help
   unit:
     runs-on: ubuntu-latest
     steps:
@@ -26,3 +37,17 @@ jobs:
       - run: .venv/bin/python -m pip install -e '.[dev]'
       - run: .venv/bin/playwright install --with-deps chromium
       - run: .venv/bin/pytest -q -m e2e
+  compatibility-contract:
+    # This is an injected compatibility-host contract test, not native WebMCP
+    # evidence. Native support requires a separately pinned real-browser lane.
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m venv .venv
+      - run: .venv/bin/python -m pip install -e '.[dev]'
+      - run: .venv/bin/playwright install --with-deps chromium
+      - run: .venv/bin/pytest -q tests/integration/test_lab_site.py -k 'object_arguments'

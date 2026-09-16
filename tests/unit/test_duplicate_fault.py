@@ -24,6 +24,17 @@ class Adapter:
     async def get_state(self): return {}
 
 
+class CancellationAdapter(Adapter):
+    cancelled = []
+
+    async def invoke_tool(self, name, args, invocation_id):
+        await __import__("asyncio").sleep(10)
+
+    async def cancel(self, invocation_id):
+        type(self).cancelled.append(invocation_id)
+        return True
+
+
 @pytest.mark.asyncio
 async def test_after_invoke_duplicate_runs_once_per_declared_fault(monkeypatch: pytest.MonkeyPatch) -> None:
     """One original invocation must terminate after exactly one duplicate."""
@@ -59,3 +70,21 @@ async def test_before_invoke_duplicate_reuses_resolved_arguments(monkeypatch: py
     assert Adapter.arguments == [{"value": "resolved"}, {"value": "resolved"}]
     invokes = [event for event in trace.events if event.type == "tool.invoke"]
     assert [event.data["args"] for event in invokes] == [{"value": "resolved"}, {"value": "resolved"}]
+
+
+@pytest.mark.asyncio
+async def test_cancel_targets_the_declared_tool_when_two_invocations_are_pending(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+    monkeypatch.setattr("webmcp_resilience.engine.runner.WebMCPAdapter", CancellationAdapter)
+    CancellationAdapter.cancelled = []
+    scenario = Scenario.model_validate({"name": "targeted-cancel", "actors": {"agent": [{"cancel": "slow-b"}]}})
+    runner = ScenarioRunner(Page(), scenario, allow_mutations=True)
+    first = asyncio.create_task(asyncio.sleep(10))
+    second = asyncio.create_task(asyncio.sleep(10))
+    runner.invocations = {"first": first, "second": second}
+    runner.invocation_names = {"first": "slow-a", "second": "slow-b"}
+    runner.adapter.cancel = CancellationAdapter.cancel.__get__(runner.adapter, type(runner.adapter))
+    await runner._execute("agent", scenario.actors["agent"][0])
+    assert CancellationAdapter.cancelled == ["second"]
+    first.cancel()
+    await asyncio.gather(first, return_exceptions=True)

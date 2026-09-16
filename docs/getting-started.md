@@ -23,22 +23,24 @@ Set the target and optional observable-state expression in
 base_url: http://localhost:3000
 browser: chromium
 state_script: window.__app.getObservableState()
-# Chromium 151 native WebMCP (when supported by the selected binary):
+# Native WebMCP example (verify this exact binary with `webmcp preflight`):
 browser_channel: chromium
 browser_args: ["--enable-features=WebMCPTesting"]
+# `auto` uses object arguments for a native host and JSON strings for the lab host.
+# webmcp_profile: auto  # native-object | legacy-string
+# Optional backend reset/state contract:
+# reset_script: "await fetch('/test/reset', {method: 'POST'})"
+# initial_state: {claims: {active: 0, capacity: 1}}
 ```
 
 The state expression runs in the page and must return an object. It is the
 state source for invariants. If it is absent, the runner observes an empty
 object rather than guessing from the DOM or traffic.
 
-Chromium 151 exposes native `document.modelContext` on real HTTP(S) pages when
-launched with `--enable-features=WebMCPTesting`. The equivalent browser flag is
-`chrome://flags/#enable-webmcp-testing`; `--enable-webmcp-testing` is not the
-Playwright launch argument for this release. Set `browser_channel: chromium` to
-avoid Playwright's default headless shell, which does not expose this
-experimental API. Use `preflight` to verify the active host and Permissions
-Policy support.
+The bundled lab is a compatibility host; its tests do not establish native
+browser support. Use `preflight` against the exact browser binary, channel and
+flags you intend to support, then run and replay a scenario without the
+fixture before treating that profile as native evidence.
 
 ## First proof: the included race fixture
 

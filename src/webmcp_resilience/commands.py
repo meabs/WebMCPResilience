@@ -19,7 +19,8 @@ from .models.bundle import (ApprovalRecord, Artifact, Compatibility, RunBundle,
                             CompatibilityRequirements, SUPPORTED_COMPATIBILITY_GROUPS, redact_recursive,
                             StateObservation, validate_identifier)
 from .models.scenario import Scenario
-from .engine import ScenarioRunner, reduce_failure, schedules
+from .engine import ScenarioRunner, schedules
+from .engine.reducer import FailureSignature, ReductionBudget, reduce_failure_report, signature_from_failure
 from .engine.explorer import ScheduledAction
 from .engine.invariants import InvariantError, validate_syntax
 from .security import agent_policy_snapshot, canonical_origin, resolve_navigation_url, validate_scenario_navigation
@@ -183,6 +184,7 @@ def build_webmcp_compatibility_report(
     runtime = probe.get("runtime", {})
     lifecycle = probe.get("lifecycle", {})
     tools = [_inventory_entry(tool, index) for index, tool in enumerate(inventory)]
+    duplicate_names = sorted(name for name, count in Counter(tool.get("name") for tool in inventory).items() if name and count > 1)
     baseline_inventory = inventory if inventory_before is None else inventory_before
     before_names = [tool.get("name") for tool in baseline_inventory if isinstance(tool, dict)]
     after_names = [tool.get("name") for tool in inventory if isinstance(tool, dict)]
@@ -318,7 +320,13 @@ def build_webmcp_compatibility_report(
             "tool-inventory-changed", "warning", "Investigate dynamic tool registration and rerun preflight before relying on the inventory.",
             "tool_inventory.changes", {"added": added, "removed": removed}, title="Tool inventory changed during preflight",
         ))
-    elif contract_drift["changed"]:
+    if duplicate_names:
+        findings.append(_finding(
+            "ambiguous-tool-names", "error",
+            "Declare an origin/frame-qualified tool selector before invoking duplicate names.",
+            "tool_inventory.duplicate_names", duplicate_names, title="Tool names are ambiguous",
+        ))
+    if contract_drift["changed"]:
         findings.append(_finding(
             "tool-contract-drift", "warning", "Investigate schema or annotation mutation and rerun preflight before relying on the inventory.",
             "tool_contract_drift", contract_drift, title="Tool contract changed during preflight",
@@ -335,6 +343,7 @@ def build_webmcp_compatibility_report(
         "webmcp": {
             "api": api,
             "native_mode": api.get("mode"),
+            "argument_profiles": sorted({tool.get("argumentMode") for tool in inventory if tool.get("argumentMode")} ),
             "toolchange_listener_supported": lifecycle.get("toolchangeListenerSupported"),
         },
         "security": {
@@ -535,6 +544,40 @@ class CommandAPI:
         target.write_text(contents)
         return target
 
+    async def _prepare_application(self, page: Any, adapter: WebMCPAdapter) -> dict[str, Any]:
+        """Apply the explicitly configured application-state boundary.
+
+        A new browser context is not a server reset.  Projects that need
+        backend isolation can provide a narrowly scoped page script (usually a
+        local reset endpoint); its use is recorded so replay cannot pretend it
+        happened implicitly.
+        """
+        boundary = {
+            "setup_configured": bool(self.config.setup_script),
+            "reset_configured": bool(self.config.reset_script),
+            "initial_state_configured": self.config.initial_state is not None,
+            "reset_applied": False,
+            "setup_applied": False,
+            "initial_state_checked": False,
+        }
+        for key, script in (("reset_applied", self.config.reset_script), ("setup_applied", self.config.setup_script)):
+            if script:
+                await page.evaluate(
+                    "script => (new Function(`return (async () => {${script}})()`))()",
+                    script,
+                )
+                boundary[key] = True
+        if self.config.initial_state is not None:
+            observed = await adapter.get_state()
+            boundary["initial_state_checked"] = True
+            boundary["observed_initial_state"] = redacted(observed)
+            if observed != self.config.initial_state:
+                raise CommandError(
+                    "initial observable state does not match configured initial_state: "
+                    f"expected {self.config.initial_state!r}, observed {observed!r}"
+                )
+        return boundary
+
     async def preflight(self, path: str = "/", *, headless: bool = True, run_id: str | None = None) -> RunBundle:
         bundle = RunBundle(command="preflight", **({"run_id": run_id} if run_id else {}))
         bundle.agent_policy = agent_policy_snapshot(
@@ -549,7 +592,7 @@ class CommandAPI:
         async with BrowserClient(self.config.browser, headless=headless, args=self.config.browser_args, channel=self.config.browser_channel) as client:
             assert client.page and client.browser
             await client.page.goto(preflight_url)
-            adapter = WebMCPAdapter(client.page, self.config.state_script, self.config.from_origins)
+            adapter = WebMCPAdapter(client.page, self.config.state_script, self.config.from_origins, self.config.webmcp_profile)
             await adapter.install()
             probe = await adapter.probe()
             inventory_before: list[dict[str, Any]] = []
@@ -604,6 +647,7 @@ class CommandAPI:
                 "channel": environment["channel"],
                 "headless": headless,
                 "user_agent": environment["user_agent"],
+                "webmcp_profile": self.config.webmcp_profile,
             }
             report = build_webmcp_compatibility_report(
                 probe,
@@ -619,6 +663,7 @@ class CommandAPI:
                 browser=self.config.browser,
                 browser_version=environment["version"],
                 headless=headless,
+                webmcp_profile=self.config.webmcp_profile,
                 capability_fingerprint=fingerprint,
                 tool_inventory_fingerprint=report["inventory_contract"]["inventory_fingerprint"],
             )
@@ -725,16 +770,30 @@ class CommandAPI:
             missing = referenced - known
             if missing:
                 raise CommandError(f"scenario references unavailable tools: {sorted(missing)}")
-            descriptors = {tool.get("name"): tool for tool in tool_inventory if isinstance(tool, dict)}
+            descriptors: dict[str, list[dict[str, Any]]] = {}
+            for tool in tool_inventory:
+                if isinstance(tool, dict):
+                    descriptors.setdefault(str(tool.get("name")), []).append(tool)
             for actions in scenario.actors.values():
                 for action in actions:
                     name = action.invoke or action.retry
-                    if name and name in descriptors:
-                        _validate_discovered_arguments(action, descriptors[name])
+                    if not name or name not in descriptors:
+                        continue
+                    matches = descriptors[name]
+                    if len(matches) > 1 and (action.tool_origin or action.tool_frame):
+                        matches = [item for item in matches if
+                                   (not action.tool_origin or (item.get("identity") or {}).get("origin") == action.tool_origin)
+                                   and (not action.tool_frame or (item.get("identity") or {}).get("frame") == action.tool_frame)]
+                    if len(matches) != 1:
+                        raise CommandError(
+                            f"ambiguous WebMCP tool name {name!r}; declare tool_origin/tool_frame to select one"
+                        )
+                    _validate_discovered_arguments(action, matches[0])
             if scenario.state:
-                state_tool = next((tool for tool in tool_inventory if tool.get("name") == scenario.state.tool), None)
-                if state_tool is None:
+                state_matches = [tool for tool in tool_inventory if tool.get("name") == scenario.state.tool]
+                if len(state_matches) != 1:
                     raise CommandError(f"scenario state tool {scenario.state.tool!r} was not discovered")
+                state_tool = state_matches[0]
                 if (state_tool.get("annotations") or {}).get("readOnlyHint") is not True:
                     raise CommandError(f"scenario state tool {scenario.state.tool!r} must be marked readOnlyHint: true")
             expectation_report = validate_contract_expectations(
@@ -845,8 +904,26 @@ class CommandAPI:
         events = record.trace.events if record.trace else []
         # Bundles are external input at this boundary; redact again rather
         # than trusting a producer's redaction declaration.
-        contents = json.dumps(redacted({"run_id": record.run_id, "result": record.result, "events": [event.model_dump(mode="json") for event in events]}), indent=2, default=str)
-        destination.write_text("<html><body><h1>WebMCP Resilience report</h1><pre>" + html.escape(contents) + "</pre></body></html>")
+        report_payload = redacted({
+            "run_id": record.run_id,
+            "result": record.result,
+            "execution": record.execution,
+            "state_changes": record.state_changes,
+            "artifacts": [item.model_dump(mode="json") for item in record.artifacts],
+            "events": [event.model_dump(mode="json") for event in events],
+        })
+        contents = json.dumps(report_payload, indent=2, default=str)
+        scheduler = record.execution.get("scheduler", {})
+        summary = (
+            f"<p>Outcome: <strong>{html.escape(str(record.result.get('passed')))}</strong> · "
+            f"requested schedules: {html.escape(str(record.result.get('requested_schedules', record.result.get('schedules', 0))))} · "
+            f"unique effective schedules: {html.escape(str(record.result.get('effective_unique_schedules', scheduler.get('effective_schedule_count', 0))))}</p>"
+        )
+        destination.write_text(
+            "<html><body><h1>WebMCP Resilience report</h1>" + summary
+            + "<p>This offline report is read-only. Replay is performed only by the webmcp CLI.</p>"
+            + "<h2>Evidence</h2><pre>" + html.escape(contents) + "</pre></body></html>"
+        )
         return {"schema_version": "1.0", "contract_version": "1.0", "engine_version": record.engine_version, "run_id": record.run_id, "output": str(destination), "passed": record.result.get("passed")}
 
     def export_handoff(self, bundle_path: Path, output: Path | None = None) -> dict[str, Path]:
@@ -914,6 +991,8 @@ class CommandAPI:
 
     async def run(self, scenario_path: Path | None = None, *, scenario: Scenario | dict[str, Any] | None = None, run_id: str | None = None, headless: bool = True,
                   allow_mutations: bool = False, adversarial: bool = False, seed: int = 0,
+                  exploration_limit: int | None = None, exploration_budget_ms: int | None = None,
+                  reduction_max_attempts: int | None = None, reduction_budget_ms: int | None = None,
                   expected_capability_fingerprint: str | None = None,
                   expected_tool_inventory_fingerprint: str | None = None,
                   expected_tool_inventory: list[dict[str, Any]] | None = None,
@@ -950,7 +1029,19 @@ class CommandAPI:
         bundle.actions = [dict(actor=actor, **action.model_dump(mode="json")) for actor, actions in scenario.actors.items() for action in actions]
         bundle.faults = [fault.model_dump(mode="json") for fault in scenario.faults]
         forced = self.schedule_from_descriptor(scenario, recorded_schedule) if recorded_schedule is not None else None
-        chosen = [forced] if forced is not None else (schedules(scenario, seed=seed) if adversarial else [None])
+        exploration = None
+        if forced is not None:
+            chosen = [forced]
+        elif adversarial:
+            generation_limit = exploration_limit if exploration_limit is not None else self.config.exploration_limit
+            generation_time_budget = exploration_budget_ms if exploration_budget_ms is not None else self.config.exploration_budget_ms
+            exploration = schedules(
+                scenario, limit=generation_limit, seed=seed,
+                time_budget_ms=generation_time_budget,
+            )
+            chosen = exploration
+        else:
+            chosen = [None]
         requirements = self._requirements(scenario)
         bundle.requirements = requirements
         bundle.compatibility.groups = requirements
@@ -969,18 +1060,25 @@ class CommandAPI:
                 "selected_logical_schedule": None,
                 "adversarial_seed": seed,
                 "recorded_trace_timestamps": [],
+                "generation_budget": {
+                    "max_schedules": exploration_limit if exploration_limit is not None else self.config.exploration_limit,
+                    "time_budget_ms": exploration_budget_ms if exploration_budget_ms is not None else self.config.exploration_budget_ms,
+                    "examined": getattr(exploration, "examined", 0),
+                    "exhausted": getattr(exploration, "exhausted", False),
+                },
             },
         }
         output_root = self._safe_output(validate_identifier(bundle.run_id, label="run id"))
         output_root.mkdir(parents=True, exist_ok=True)
         last_error: Exception | None = None
+        effective_schedules: set[str] = set()
         for index, schedule in enumerate(chosen):
             actual_schedule = schedule or [(action.offset_ms, actor, action) for actor, actions in scenario.actors.items() for action in actions]
             # A new browser context for each schedule prevents state bleed between exploration variants.
             async with BrowserClient(self.config.browser, headless=headless, args=self.config.browser_args, channel=self.config.browser_channel) as client:
                 assert client.page
                 await client.page.goto(initial_url)
-                readiness = WebMCPAdapter(client.page, self.config.state_script, self.config.from_origins)
+                readiness = WebMCPAdapter(client.page, self.config.state_script, self.config.from_origins, self.config.webmcp_profile)
                 await readiness.install()
                 probe = await readiness.probe()
                 fingerprint = hashlib.sha256(json.dumps(redacted(probe), sort_keys=True).encode()).hexdigest()[:16]
@@ -996,11 +1094,13 @@ class CommandAPI:
                     "platform": platform.platform(),
                     "url": client.page.url,
                     "user_agent": probe.get("runtime", {}).get("userAgent"),
+                    "webmcp_profile": self.config.webmcp_profile,
                 })
                 bundle.compatibility = Compatibility(
                     browser=self.config.browser,
                     browser_version=browser_version,
                     headless=headless,
+                    webmcp_profile=self.config.webmcp_profile,
                     capability_fingerprint=fingerprint,
                     groups=requirements,
                 )
@@ -1029,7 +1129,12 @@ class CommandAPI:
                     )
                 network: list[dict[str, Any]] = []
                 client.page.on("response", lambda response: network.append({"url": response.url, "status": response.status, "method": response.request.method}))
-                runner = ScenarioRunner(client.page, scenario, self.config.state_script, self.config.from_origins, allow_mutations, base_url=self.config.base_url)
+                state_boundary = await self._prepare_application(client.page, readiness)
+                bundle.browser_environment["state_boundary"] = redacted(state_boundary)
+                # Setup/reset may register or withdraw tools.  Re-discover
+                # after applying it; the runner receives the same live
+                # descriptors that were used for contract validation.
+                runner = ScenarioRunner(client.page, scenario, self.config.state_script, self.config.from_origins, allow_mutations, base_url=self.config.base_url, webmcp_profile=self.config.webmcp_profile)
                 # Discovery supplies the live compatibility contract. Validate
                 # and compare it before any scenario tool or UI action runs.
                 available_tools = await readiness.get_tools()
@@ -1099,6 +1204,12 @@ class CommandAPI:
                 try:
                     trace = await runner.run(actual_schedule)
                     bundle.trace = trace
+                    effective_dispatch = getattr(runner, "effective_dispatch", [])
+                    effective_schedules.add(json.dumps(effective_dispatch, sort_keys=True, default=str))
+                    bundle.execution["scheduler"].update({
+                        "last_effective_dispatch": effective_dispatch,
+                        "effective_schedule_count": len(effective_schedules),
+                    })
                     self._record_scheduler_trace(bundle)
                     bundle.state_changes = [event.model_dump(mode="json") for event in trace.events if event.type == "state.observed"]
                     shot = output_root / f"schedule-{index}.png"
@@ -1108,7 +1219,13 @@ class CommandAPI:
                     bundle.artifacts.append(Artifact(kind="network", path=str(network_path), description="redacted response metadata", redacted=True, sensitivity="redacted"))
                 except Exception as error:
                     last_error = error
-                    bundle.trace = runner.recorder.run
+                    bundle.trace = getattr(getattr(runner, "recorder", None), "run", None)
+                    effective_dispatch = getattr(runner, "effective_dispatch", [])
+                    effective_schedules.add(json.dumps(effective_dispatch, sort_keys=True, default=str))
+                    bundle.execution["scheduler"].update({
+                        "last_effective_dispatch": effective_dispatch,
+                        "effective_schedule_count": len(effective_schedules),
+                    })
                     self._record_scheduler_trace(bundle)
                     bundle.execution.update({"schedule": self.schedule_descriptor(scenario, actual_schedule), "schedule_index": index})
                     bundle.execution["scheduler"]["selected_logical_schedule"] = bundle.execution["schedule"]
@@ -1120,25 +1237,54 @@ class CommandAPI:
                         bundle.artifacts.append(Artifact(kind="screenshot", path=str(shot), description="failure page state", redacted=False, sensitivity="potentially_sensitive"))
                     network_path = self._safe_output(bundle.run_id, "network-failure.json"); self._safe_write(network_path, json.dumps(redacted(network), indent=2))
                     bundle.artifacts.append(Artifact(kind="network", path=str(network_path), description="redacted response metadata", redacted=True, sensitivity="redacted"))
-                    async def reproduces(candidate: Scenario) -> bool:
+                    target_signature = signature_from_failure(error, trace=getattr(getattr(runner, "recorder", None), "run", None))
+                    reduction_budget = ReductionBudget(
+                        max_attempts=reduction_max_attempts if reduction_max_attempts is not None else self.config.reduction_max_attempts,
+                        time_budget_ms=reduction_budget_ms if reduction_budget_ms is not None else self.config.reduction_budget_ms,
+                    )
+
+                    async def reproduces(candidate: Scenario) -> FailureSignature | None:
                         async with BrowserClient(self.config.browser, headless=headless, args=self.config.browser_args, channel=self.config.browser_channel) as fresh:
                             assert fresh.page
                             await fresh.page.goto(resolve_navigation_url(candidate.url, self.config.base_url))
                             try:
                                 candidate_schedule = [item for item in actual_schedule if item[1] in candidate.actors and item[2] in candidate.actors[item[1]]]
-                                await ScenarioRunner(fresh.page, candidate, self.config.state_script, self.config.from_origins, allow_mutations, base_url=self.config.base_url).run(candidate_schedule)
-                            except Exception:
-                                return True
-                            return False
-                    reduced = await reduce_failure(scenario, reproduces)
+                                candidate_adapter = WebMCPAdapter(fresh.page, self.config.state_script, self.config.from_origins, self.config.webmcp_profile)
+                                await candidate_adapter.install()
+                                await self._prepare_application(fresh.page, candidate_adapter)
+                                candidate_runner = ScenarioRunner(
+                                    fresh.page, candidate, self.config.state_script, self.config.from_origins,
+                                    allow_mutations, base_url=self.config.base_url,
+                                    webmcp_profile=self.config.webmcp_profile,
+                                )
+                                await candidate_runner.run(candidate_schedule)
+                            except Exception as candidate_error:
+                                return signature_from_failure(candidate_error, trace=locals().get("candidate_runner", None).recorder.run if "candidate_runner" in locals() else None)
+                            return None
+
+                    if target_signature is not None:
+                        reduction = await reduce_failure_report(
+                            scenario, reproduces, target_signature=target_signature, budget=reduction_budget
+                        )
+                        reduced = reduction.scenario
+                    else:
+                        reduction = None
+                        reduced = scenario
                     repro = output_root / "repro.yaml"
                     reduced_schedule = [item for item in actual_schedule if item[1] in reduced.actors and item[2] in reduced.actors[item[1]]]
-                    repro_execution = bundle.execution | {"schedule": self.schedule_descriptor(reduced, reduced_schedule)}
+                    repro_execution = bundle.execution | {"schedule": self.schedule_descriptor(reduced, reduced_schedule), "reduction": {
+                        "status": "completed" if reduction else "not_attempted",
+                        "target_signature": target_signature.as_dict() if target_signature else None,
+                        "attempts": reduction.attempts if reduction else 0,
+                        "budget": reduction_budget.__dict__,
+                        "budget_exhausted": reduction.exhausted if reduction else False,
+                        "rejected_signatures": [item.as_dict() for item in reduction.rejected_signatures] if reduction else [],
+                    }}
                     self._safe_write(repro, yaml.safe_dump(redacted({"schema_version": bundle.schema_version, "run_id": bundle.run_id, "requirements": requirements.model_dump(mode="json"), "compatibility": bundle.compatibility.model_dump(mode="json"), "execution": repro_execution, "scenario": reduced.model_dump(mode="json")}), sort_keys=False))
                     bundle.artifacts.append(Artifact(kind="scenario", path=str(repro), redacted=True, sensitivity="redacted", description="redacted minimized diagnostic with schedule; replay bundle.json", run_id=bundle.run_id))
                     break
         if not bundle.compatibility.capability_fingerprint:
-            bundle.compatibility = Compatibility(browser=self.config.browser, headless=headless, groups=requirements)
+            bundle.compatibility = Compatibility(browser=self.config.browser, headless=headless, webmcp_profile=self.config.webmcp_profile, groups=requirements)
         if bundle.execution["schedule"] is None and chosen:
             bundle.execution.update({"schedule": self.schedule_descriptor(scenario, chosen[0] or [(action.offset_ms, actor, action) for actor, actions in scenario.actors.items() for action in actions]), "schedule_index": 0})
             bundle.execution["scheduler"]["selected_logical_schedule"] = bundle.execution["schedule"]
@@ -1154,7 +1300,8 @@ class CommandAPI:
             if any(event.type.endswith(".fail") for event in assertion_events):
                 bundle.tool_contract_expectations["status"] = "failed"
                 bundle.tool_contract_expectations["passed"] = False
-        bundle.result = {"passed": last_error is None, "error": str(last_error) if last_error else None, "schedules": len(chosen), "seed": seed, "contract_version": bundle.schema_version, "engine_version": bundle.compatibility.engine_version,
+        bundle.execution["scheduler"]["effective_schedule_count"] = len(effective_schedules)
+        bundle.result = {"passed": last_error is None, "error": str(last_error) if last_error else None, "schedules": len(chosen), "requested_schedules": len(chosen), "effective_unique_schedules": len(effective_schedules), "seed": seed, "contract_version": bundle.schema_version, "engine_version": bundle.compatibility.engine_version,
                          "tool_inventory_fingerprint": bundle.compatibility.tool_inventory_fingerprint,
                          "tool_contract_drift": bundle.tool_contract_drift,
                          "tool_contract_replay_decision": bundle.tool_contract_replay_decision,
@@ -1183,6 +1330,11 @@ class CommandAPI:
         self._validate_replay_inventory_evidence(saved)
         if saved.compatibility.browser and saved.compatibility.browser != self.config.browser:
             raise CommandError(f"unsafe replay rejected: bundle requires {saved.compatibility.browser}, configured browser is {self.config.browser}")
+        if saved.compatibility.webmcp_profile != self.config.webmcp_profile:
+            raise CommandError(
+                "unsafe replay rejected: bundle requires WebMCP argument profile "
+                f"{saved.compatibility.webmcp_profile!r}, configured profile is {self.config.webmcp_profile!r}"
+            )
         scenario = Scenario.model_validate(saved.scenario)
         self._validate_scenario_semantics(scenario)
         requirements = saved.requirements
@@ -1245,6 +1397,12 @@ class CommandAPI:
                      allowed_target_origins: Iterable[str] | None = None) -> RunBundle:
         """Replay a contract bundle without any frontend-specific filesystem shim."""
         scenario, seed, saved = self.replay_bundle(path)
+        boundary = saved.browser_environment.get("state_boundary", {})
+        if isinstance(boundary, dict):
+            if boundary.get("reset_configured") and not self.config.reset_script:
+                raise CommandError("unsafe replay rejected: saved run required a reset_script but the current config has none")
+            if boundary.get("setup_configured") and not self.config.setup_script:
+                raise CommandError("unsafe replay rejected: saved run required a setup_script but the current config has none")
         replay_api = CommandAPI(_recorded_replay_config(self.config, saved), output_dir=self.output_dir)
         fingerprint_policy = saved.inventory_contract.get("fingerprint_policy")
         saved_policy = (
