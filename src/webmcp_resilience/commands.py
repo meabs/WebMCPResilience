@@ -1,6 +1,7 @@
 """Typed command interface shared by CLI, console and Python callers."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import html
 import json

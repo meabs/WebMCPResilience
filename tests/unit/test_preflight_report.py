@@ -127,3 +127,48 @@ def test_command_preflight_never_invokes_a_page_tool(tmp_path: Path, monkeypatch
     report_artifact = next(artifact for artifact in bundle.artifacts if artifact.kind == "report")
     report = json.loads(Path(report_artifact.path).read_text())
     assert report["report_kind"] == "webmcp_compatibility"
+
+
+def test_command_preflight_rechecks_empty_inventory_after_registration_grace(tmp_path: Path, monkeypatch) -> None:
+    """Preflight must wait for delayed registration before reporting no tools."""
+    class FakePage:
+        url = "https://app.example/"
+
+        async def goto(self, url: str) -> None:
+            self.url = url
+
+    class FakeBrowser:
+        version = "123.0"
+
+    class FakeClient:
+        page = FakePage()
+        browser = FakeBrowser()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+    class FakeAdapter:
+        def __init__(self, *_args, **_kwargs):
+            self.discovery_count = 0
+
+        async def install(self) -> None:
+            pass
+
+        async def probe(self) -> dict:
+            return probe()
+
+        async def get_tools(self) -> list[dict]:
+            self.discovery_count += 1
+            if self.discovery_count == 1:
+                return []
+            return [{"name": "read", "inputSchema": {"type": "object", "properties": {}}, "annotations": {"readOnlyHint": True}}]
+
+    monkeypatch.setattr("webmcp_resilience.commands.BrowserClient", lambda *args, **kwargs: FakeClient())
+    monkeypatch.setattr("webmcp_resilience.commands.WebMCPAdapter", FakeAdapter)
+    bundle = asyncio.run(CommandAPI(Config(base_url="https://app.example", tool_registration_grace_ms=1)).preflight())
+
+    assert [tool["name"] for tool in bundle.tool_inventory] == ["read"]
+    assert bundle.preflight["inventory_changes"]["added"] == ["read"]
