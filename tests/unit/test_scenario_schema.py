@@ -34,6 +34,11 @@ def test_accepts_final_invariants_and_per_invocation_timeout() -> None:
     assert scenario.final_invariants == ["booking.confirmed == true"]
 
 
+def test_scenario_can_explicitly_allow_intentional_navigation() -> None:
+    scenario = Scenario.model_validate({"name": "leave-page", "allow_navigation": True, "actors": {"agent": [{"invoke": "toolautosubmit"}]}})
+    assert scenario.allow_navigation is True
+
+
 def test_unsupported_timed_fault_is_rejected() -> None:
     with pytest.raises(ValueError, match="unsupported"):
         Fault(type="timeout", at="after_invoke")
@@ -140,3 +145,37 @@ async def test_navigation_destroyed_context_has_a_stable_error_code() -> None:
         await runner._invoke("agent", "track", "track_order", {})
     assert raised.value.code == "navigation_destroyed_context"
     assert runner.recorder.run.events[-1].data["error_code"] == "navigation_destroyed_context"
+
+
+@pytest.mark.asyncio
+async def test_order_tracking_state_read_after_tool_navigation_is_classified() -> None:
+    class Adapter:
+        async def get_state(self):
+            raise RuntimeError("Cannot find context with specified id")
+
+    scenario = Scenario.model_validate({
+        "name": "order-tracking", "actors": {"agent": [{"action": "wait", "value": "0"}]},
+        "invariants": ["order.tracked == true"],
+    })
+    runner = ScenarioRunner(_Page(), scenario)  # type: ignore[arg-type]
+    runner.adapter = Adapter()  # type: ignore[assignment]
+    with pytest.raises(NavigationDestroyedContextError) as raised:
+        await runner._check_invariants("agent")
+    assert raised.value.code == "navigation_destroyed_context"
+    event = runner.recorder.run.events[-1]
+    assert event.type == "tool.navigation_destroy"
+    assert event.data == {"phase": "state"}
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_refresh_after_navigation_is_classified() -> None:
+    class Adapter:
+        async def drain_lifecycle_events(self):
+            raise RuntimeError("Execution context was destroyed")
+
+    scenario = Scenario.model_validate({"name": "history", "actors": {"agent": [{"action": "wait", "value": "0"}]}})
+    runner = ScenarioRunner(_Page(), scenario)  # type: ignore[arg-type]
+    runner.adapter = Adapter()  # type: ignore[assignment]
+    with pytest.raises(NavigationDestroyedContextError):
+        await runner._record_lifecycle()
+    assert runner.recorder.run.events[-1].data == {"phase": "await"}

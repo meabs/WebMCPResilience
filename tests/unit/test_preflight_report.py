@@ -81,6 +81,14 @@ def test_empty_inventory_after_grace_is_classified_as_registration_hung() -> Non
     assert finding["severity"] == "error"
 
 
+def test_toolautosubmit_contract_gets_a_navigation_note() -> None:
+    report = build_webmcp_compatibility_report(
+        probe(), [{"name": "toolautosubmit", "inputSchema": {"type": "object"}, "annotations": {}}], browser={}
+    )
+    finding = next(item for item in report["findings"] if item["id"] == "tool-may-navigate")
+    assert finding["severity"] == "info"
+
+
 def test_command_preflight_never_invokes_a_page_tool(tmp_path: Path, monkeypatch) -> None:
     calls: list[str] = []
 

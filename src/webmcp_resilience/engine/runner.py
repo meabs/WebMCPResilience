@@ -40,8 +40,9 @@ class NavigationDestroyedContextError(RuntimeError):
 
     code = "navigation_destroyed_context"
 
-    def __init__(self, error: Exception) -> None:
-        super().__init__("tool invocation lost its browser execution context during navigation")
+    def __init__(self, error: Exception, phase: str) -> None:
+        super().__init__(f"browser execution context was destroyed during {phase}")
+        self.phase = phase
         self.__cause__ = error
 
 
@@ -82,6 +83,23 @@ class ScenarioRunner:
     def _on_navigation(self, frame: Any) -> None:
         if frame == self.page.main_frame:
             self._adapter_stale = True
+
+    def classify_browser_error(
+        self, error: Exception, *, phase: str, name: str | None = None, invocation_id: str | None = None
+    ) -> Exception:
+        """Turn navigation-invalidated Playwright errors into portable evidence."""
+        if not _is_navigation_destroyed(error):
+            return error
+        classified = NavigationDestroyedContextError(error, phase)
+        self.recorder.add(
+            "system", "tool.navigation_destroy", name=name, invocation_id=invocation_id,
+            data={"phase": phase},
+        )
+        return classified
+
+    @staticmethod
+    def _error_code(error: Exception) -> str:
+        return str(getattr(error, "code", None) or "unknown_browser_error")
 
     async def _ensure_adapter(self) -> None:
         if self._adapter_stale:
@@ -268,12 +286,43 @@ class ScenarioRunner:
         return not any(self._fault_due(fault, name, "before_invoke") for fault in self.faults)
 
     async def _record_lifecycle(self) -> None:
-        for event in await self.adapter.drain_lifecycle_events():
+        if self._adapter_stale and self.scenario.allow_navigation:
+            try:
+                await self._ensure_adapter()
+            except Exception as error:
+                classified = self.classify_browser_error(error, phase="await")
+                if classified is error:
+                    raise
+                raise classified from error
+        try:
+            events = await self.adapter.drain_lifecycle_events()
+        except Exception as error:
+            if _is_navigation_destroyed(error) and self.scenario.allow_navigation:
+                self._adapter_stale = True
+                await self._ensure_adapter()
+                events = await self.adapter.drain_lifecycle_events()
+            else:
+                classified = self.classify_browser_error(error, phase="await")
+                if classified is error:
+                    raise
+                raise classified from error
+        for event in events:
             self.recorder.add("system", "tool.change", data=event)
         # A lifecycle event is a cache invalidation signal.  Refreshing here
         # keeps dynamic registration, changed annotations, and navigation from
         # being represented using stale descriptors.
-        refreshed = await self.adapter.get_tools()
+        try:
+            refreshed = await self.adapter.get_tools()
+        except Exception as error:
+            if _is_navigation_destroyed(error) and self.scenario.allow_navigation:
+                self._adapter_stale = True
+                await self._ensure_adapter()
+                refreshed = await self.adapter.get_tools()
+            else:
+                classified = self.classify_browser_error(error, phase="await")
+                if classified is error:
+                    raise
+                raise classified from error
         self._set_tools(refreshed)
         self.recorder.add("system", "tool.inventory.refresh", data={
             "count": len(refreshed),
@@ -293,7 +342,13 @@ class ScenarioRunner:
                 "policy_denied: read-only policy blocks state-changing UI and cancellation actions"
             )
         if action.invoke or action.retry:
-            await self._ensure_adapter()
+            try:
+                await self._ensure_adapter()
+            except Exception as error:
+                classified = self.classify_browser_error(error, phase="await")
+                if classified is error:
+                    raise
+                raise classified from error
             name, event = action.invoke or action.retry, "tool.invoke" if action.invoke else "tool.retry"
             descriptor = self._descriptor_for(name, action)
             if not self.allow_mutations and not (descriptor.get("annotations") or {}).get("readOnlyHint", False):
@@ -310,7 +365,13 @@ class ScenarioRunner:
                               data={"operation": event, "args": arguments})
             self.recorder.add(actor, event, name=name, invocation_id=invocation_id, data={"args": arguments})
             if prestart_tool:
-                await self._start_adapter(name, arguments, invocation_id, descriptor)
+                try:
+                    await self._start_adapter(name, arguments, invocation_id, descriptor)
+                except Exception as error:
+                    classified = self.classify_browser_error(error, phase="invoke", name=name, invocation_id=invocation_id)
+                    if classified is error:
+                        raise
+                    raise classified from error
                 self.effective_dispatch.append({"invocation_id": invocation_id, "actor": actor, "name": name, "mode": "prestarted", "handle_id": descriptor.get("handleId")})
                 self.recorder.add(actor, "action.dispatched", name=name, invocation_id=invocation_id, data={"mode": "prestarted", "handle_id": descriptor.get("handleId")})
                 if deferred is None:
@@ -342,7 +403,13 @@ class ScenarioRunner:
             # first pending task belonging to a different actor/tool.
             for invocation_id, task in self.invocations.items():
                 if self.invocation_names.get(invocation_id) == action.cancel and not task.done():
-                    await self.adapter.cancel(invocation_id)
+                    try:
+                        await self.adapter.cancel(invocation_id)
+                    except Exception as error:
+                        classified = self.classify_browser_error(error, phase="await", name=action.cancel, invocation_id=invocation_id)
+                        if classified is error:
+                            raise
+                        raise classified from error
                     task.cancel()
                     self.recorder.add(actor, "tool.cancel", name=action.cancel, invocation_id=invocation_id)
                     self.recorder.add(actor, "action.dispatched", name=action.cancel, invocation_id=request_id,
@@ -359,9 +426,13 @@ class ScenarioRunner:
         try:
             await self._ui(actor, action)
         except Exception as error:
+            classified = self.classify_browser_error(error, phase="await", invocation_id=request_id)
             self.recorder.add(actor, "action.completed", invocation_id=request_id,
-                              data={"outcome": "error", "error_type": type(error).__name__})
-            raise
+                              data={"outcome": "error", "error_type": type(classified).__name__,
+                                    "error_code": self._error_code(classified)})
+            if classified is error:
+                raise
+            raise classified from error
         self.recorder.add(actor, "action.completed", invocation_id=request_id,
                           data={"outcome": "result"})
         return None
@@ -435,8 +506,20 @@ class ScenarioRunner:
                               data={"outcome": "cancelled"})
             raise
         except Exception as error:
-            if _is_navigation_destroyed(error):
-                classified = NavigationDestroyedContextError(error)
+            if _is_navigation_destroyed(error) and self.scenario.allow_navigation:
+                # A declared navigation is not a failed tool result. Rebind to
+                # its destination document before the next state/tool action.
+                self._adapter_stale = True
+                await self._ensure_adapter()
+                self.recorder.add(actor, "tool.navigation", name=name, invocation_id=invocation_id,
+                                  data={"phase": "await" if prestarted else "invoke", "rebound": True})
+                self.recorder.add(actor, "action.completed", name=name, invocation_id=invocation_id,
+                                  data={"outcome": "navigation"})
+                return
+            classified = self.classify_browser_error(
+                error, phase="await" if prestarted else "invoke", name=name, invocation_id=invocation_id
+            )
+            if classified is not error:
                 self.recorder.add(actor, "tool.error", name=name, invocation_id=invocation_id,
                                   data={"error": str(classified), "error_code": classified.code})
                 self.recorder.add(actor, "action.completed", name=name, invocation_id=invocation_id,
@@ -444,10 +527,10 @@ class ScenarioRunner:
                                         "error_code": classified.code})
                 raise classified from error
             self.recorder.add(actor, "tool.error", name=name, invocation_id=invocation_id,
-                              data={"error": str(error), "error_code": getattr(error, "code", None)})
+                              data={"error": str(error), "error_code": self._error_code(error)})
             self.recorder.add(actor, "action.completed", name=name, invocation_id=invocation_id,
                               data={"outcome": "error", "error_type": type(error).__name__,
-                                    "error_code": getattr(error, "code", None)})
+                                    "error_code": self._error_code(error)})
             raise
 
     async def _cancel_after_yield(self, invocation_id: str, name: str) -> None:
@@ -518,10 +601,29 @@ class ScenarioRunner:
         expressions = self.scenario.final_invariants if final else self.scenario.invariants
         if not expressions:
             return
+        if self._adapter_stale and self.scenario.allow_navigation:
+            try:
+                await self._ensure_adapter()
+            except Exception as error:
+                classified = self.classify_browser_error(error, phase="await")
+                if classified is error:
+                    raise
+                raise classified from error
         if not final and self.state_settle_ms:
             await self.page.wait_for_timeout(self.state_settle_ms)
             self.recorder.add("system", "state.settled", data={"duration_ms": self.state_settle_ms})
-        state = await self.adapter.get_state()
+        try:
+            state = await self.adapter.get_state()
+        except Exception as error:
+            if _is_navigation_destroyed(error) and self.scenario.allow_navigation:
+                self._adapter_stale = True
+                await self._ensure_adapter()
+                state = await self.adapter.get_state()
+            else:
+                classified = self.classify_browser_error(error, phase="state")
+                if classified is error:
+                    raise
+                raise classified from error
         self.recorder.add("system", "state.observed", state=state)
         for expression in expressions:
             try:

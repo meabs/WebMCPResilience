@@ -49,6 +49,12 @@ When discovery returns duplicate tool names, add `tool_origin` and/or
 `tool_frame` to the tool action. Unqualified duplicate names are rejected as
 ambiguous before execution.
 
+Some declarative tools intentionally submit a form and replace the current
+document. Such a scenario must opt in with `allow_navigation: true`; the runner
+waits for the destination document and rebinds its adapter before later tool
+or state work. Without that opt-in, a destroyed browser context is reported as
+`navigation_destroyed_context` with a `tool.navigation_destroy` trace event.
+
 ## State: two explicit mechanisms
 
 `state_script` in `.webmcp/config.yaml` returns the object checked by state

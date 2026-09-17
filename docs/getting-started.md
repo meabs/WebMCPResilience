@@ -60,6 +60,13 @@ reports `tool_invoke_timeout`. This usually means a declarative tool is waiting
 for a user confirmation or another browser-side completion step; it is not
 automatically an application bug.
 
+For example, a French-bistro-style declarative booking flow that does not
+settle is reported as `tool_invoke_timeout`. An order-tracking tool that
+returns and then navigates before observable state can be read is reported as
+`navigation_destroyed_context`; inspect the matching `tool.navigation_destroy`
+trace event to see whether it happened during invocation, await, state, or
+screenshot capture.
+
 Set `timeout_ms` on an individual `invoke` or `retry` when one action needs a
 different budget; it overrides `invoke_timeout_ms` only for that action. For
 reactive apps whose observable state lags a completed click or tool call, set

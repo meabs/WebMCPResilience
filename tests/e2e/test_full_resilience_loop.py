@@ -80,6 +80,33 @@ await document.modelContext.registerTool({{
 </script></body></html>"""
 
 
+def toolautosubmit_page() -> str:
+    return """<!doctype html><html><body><script type="module">
+const tools = [];
+window.__orderTrackingState = () => ({order: {tracked: false}});
+document.modelContext = {
+  __webmcpResilienceCompatibilityHost: true,
+  async registerTool(tool) { tools.push(tool); },
+  async getTools() { return tools; },
+  async executeTool(tool, json) { return tool.execute(JSON.parse(json)); },
+};
+await document.modelContext.registerTool({
+  name: 'toolautosubmit', inputSchema: {type: 'object'}, annotations: {readOnlyHint: true},
+  execute: () => { location.assign('/history.html'); return {code: 'OK'}; },
+});
+</script></body></html>"""
+
+
+def history_page() -> str:
+    return """<!doctype html><html><body><script>
+window.__orderTrackingState = () => ({order: {tracked: true}});
+document.modelContext = {
+  __webmcpResilienceCompatibilityHost: true,
+  async getTools() { return []; }, async executeTool() { return {code: 'UNAVAILABLE'}; },
+};
+</script>History</body></html>"""
+
+
 def test_cli_full_loop_replays_a_redacted_adversarial_failure(
     tmp_path: Path, lab_server: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -242,6 +269,66 @@ def test_browser_backed_replay_rejects_changed_tool_contract(tmp_path: Path) -> 
         assert caught.value.code == "tool_contract_drift"
         assert caught.value.details["changed_input_schemas"] == ["reserve_inventory"]
         assert caught.value.details["policy_impact"] == "breaking"
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+
+def test_toolautosubmit_navigation_to_history_has_typed_bundle_error(tmp_path: Path) -> None:
+    site = tmp_path / "order-tracking"
+    site.mkdir()
+    (site / "index.html").write_text(toolautosubmit_page())
+    (site / "history.html").write_text(history_page())
+    server = ThreadingHTTPServer(("127.0.0.1", 0), partial(_QuietDirectoryHandler, directory=str(site)))
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        api = CommandAPI(
+            Config(base_url=base_url, state_script="window.__orderTrackingState()"),
+            output_dir=tmp_path / ".webmcp" / "runs",
+        )
+        bundle = asyncio.run(api.run(
+            scenario={
+                "name": "order-tracking-navigation",
+                "actors": {"agent": [{"invoke": "toolautosubmit"}]},
+                "invariants": ["order.tracked == true"],
+            },
+            run_id="toolautosubmit-history", headless=True,
+        ))
+        assert bundle.result["passed"] is False
+        assert bundle.result["error_code"] == "navigation_destroyed_context"
+        event = next(event for event in bundle.trace.events if event.type == "tool.navigation_destroy")
+        assert event.data["phase"] in {"invoke", "await", "state"}
+        saved = api.save(bundle)
+        assert json.loads(saved.read_text())["result"]["error_code"] == "navigation_destroyed_context"
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+
+def test_allow_navigation_rebinds_after_toolautosubmit(tmp_path: Path) -> None:
+    site = tmp_path / "intentional-navigation"
+    site.mkdir()
+    (site / "index.html").write_text(toolautosubmit_page())
+    (site / "history.html").write_text(history_page())
+    server = ThreadingHTTPServer(("127.0.0.1", 0), partial(_QuietDirectoryHandler, directory=str(site)))
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        api = CommandAPI(Config(base_url=base_url, state_script="window.__orderTrackingState()"), output_dir=tmp_path / "runs")
+        bundle = asyncio.run(api.run(
+            scenario={
+                "name": "intentional-navigation", "allow_navigation": True,
+                "actors": {"agent": [{"invoke": "toolautosubmit"}]},
+                "invariants": ["order.tracked == true"],
+            }, run_id="allow-navigation", headless=True,
+        ))
+        assert bundle.result["passed"] is True, bundle.result
+        assert any(event.type == "adapter.reattached" for event in bundle.trace.events)
     finally:
         server.shutdown()
         thread.join()

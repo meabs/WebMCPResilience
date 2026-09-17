@@ -106,6 +106,9 @@ class Scenario(BaseModel):
     tool_contracts: dict[str, ToolContractExpectation] = Field(default_factory=dict)
     compatibility: dict[str, Any] = Field(default_factory=lambda: {"schema": "webmcp-resilience/scenario-1", "requires": {"scenario": "1", "fault_model": "1", "invariant_model": "1", "trace_model": "1", "browser_webmcp_adapter": "1"}})
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # Navigation-capable declarative tools may intentionally replace the page.
+    # Opting in lets the runner wait for and bind the destination document.
+    allow_navigation: bool = False
     # Same-actor order is preserved by exploration by default.  Opting into
     # permutations is an explicit scenario declaration because it changes the
     # meaning of a user-authored schedule.

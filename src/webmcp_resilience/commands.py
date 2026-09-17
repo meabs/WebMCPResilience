@@ -312,6 +312,21 @@ def build_webmcp_compatibility_report(
                 "Publish tool annotations, especially readOnlyHint or destructiveHint, so callers can apply safe execution policy.",
                 f"tool_inventory[{item['index']}].annotations", item["annotation_quality"], title=f"Tool annotations missing: {item.get('name')}",
             ))
+        annotations = item.get("annotations") or {}
+        name = str(item.get("name") or "").lower()
+        navigation_hint = (
+            "toolautosubmit" in name
+            or annotations.get("navigation") is True
+            or annotations.get("navigates") is True
+            or annotations.get("completionMode") in {"submit", "respondWith", "dialog"}
+        )
+        if navigation_hint:
+            findings.append(_finding(
+                "tool-may-navigate", "info",
+                "This contract may replace the document. Declare allow_navigation: true only when the scenario intentionally follows the destination page.",
+                f"tool_inventory[{item['index']}].navigation_hint", {"name": item.get("name"), "annotations": annotations},
+                title=f"Tool may navigate: {item.get('name')}",
+            ))
     if inventory_error:
         findings.append(_finding(
             "tool-inventory-error", "error", "Fix the WebMCP getTools implementation so the browser can expose a stable inventory.",
@@ -1260,7 +1275,11 @@ class CommandAPI:
                     self._record_scheduler_trace(bundle)
                     bundle.state_changes = [event.model_dump(mode="json") for event in trace.events if event.type == "state.observed"]
                     shot = output_root / f"schedule-{index}.png"
-                    await client.page.screenshot(path=str(shot), full_page=True)
+                    try:
+                        await client.page.screenshot(path=str(shot), full_page=True)
+                    except Exception as error:
+                        classified = runner.classify_browser_error(error, phase="screenshot")
+                        raise classified from error
                     bundle.artifacts.append(Artifact(kind="screenshot", path=str(shot), description="final page state", redacted=False, sensitivity="potentially_sensitive"))
                     network_path = self._safe_output(bundle.run_id, f"network-{index}.json"); self._safe_write(network_path, json.dumps(redacted(network), indent=2))
                     bundle.artifacts.append(Artifact(kind="network", path=str(network_path), description="redacted response metadata", redacted=True, sensitivity="redacted"))
@@ -1280,7 +1299,11 @@ class CommandAPI:
                     bundle.artifacts.append(Artifact(kind="failure", path=str(failure), redacted=True, sensitivity="redacted", description="redacted diagnostic; replay bundle.json, not this file", run_id=bundle.run_id))
                     shot = output_root / "failure.png"
                     with suppress(Exception):
-                        await client.page.screenshot(path=str(shot), full_page=True)
+                        try:
+                            await client.page.screenshot(path=str(shot), full_page=True)
+                        except Exception as screenshot_error:
+                            runner.classify_browser_error(screenshot_error, phase="screenshot")
+                            raise
                         bundle.artifacts.append(Artifact(kind="screenshot", path=str(shot), description="failure page state", redacted=False, sensitivity="potentially_sensitive"))
                     network_path = self._safe_output(bundle.run_id, "network-failure.json"); self._safe_write(network_path, json.dumps(redacted(network), indent=2))
                     bundle.artifacts.append(Artifact(kind="network", path=str(network_path), description="redacted response metadata", redacted=True, sensitivity="redacted"))
@@ -1349,7 +1372,7 @@ class CommandAPI:
                 bundle.tool_contract_expectations["status"] = "failed"
                 bundle.tool_contract_expectations["passed"] = False
         bundle.execution["scheduler"]["effective_schedule_count"] = len(effective_schedules)
-        bundle.result = {"passed": last_error is None, "error": str(last_error) if last_error else None, "error_code": getattr(last_error, "code", None) if last_error else None, "schedules": len(chosen), "requested_schedules": len(chosen), "effective_unique_schedules": len(effective_schedules), "seed": seed, "contract_version": bundle.schema_version, "engine_version": bundle.compatibility.engine_version,
+        bundle.result = {"passed": last_error is None, "error": str(last_error) if last_error else None, "error_code": (getattr(last_error, "code", None) or "unknown_browser_error") if last_error else None, "schedules": len(chosen), "requested_schedules": len(chosen), "effective_unique_schedules": len(effective_schedules), "seed": seed, "contract_version": bundle.schema_version, "engine_version": bundle.compatibility.engine_version,
                          "tool_inventory_fingerprint": bundle.compatibility.tool_inventory_fingerprint,
                          "tool_contract_drift": bundle.tool_contract_drift,
                          "tool_contract_replay_decision": bundle.tool_contract_replay_decision,
