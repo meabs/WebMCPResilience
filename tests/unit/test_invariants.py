@@ -8,8 +8,9 @@ def test_compares_observed_nested_state() -> None:
 
 
 def test_rejects_failed_observed_state() -> None:
-    with pytest.raises(InvariantError):
+    with pytest.raises(InvariantError) as raised:
         check("app.completed <= app.accepted", {"app": {"completed": 2, "accepted": 1}})
+    assert raised.value.code == "invariant_violation"
 
 
 def test_rejects_executable_expression() -> None:
