@@ -142,6 +142,7 @@ def test_cli_full_loop_replays_a_redacted_adversarial_failure(
     assert failed.exit_code == 1, failed.output
     failed_payload = decode(failed.output)
     assert failed_payload["result"]["passed"] is False
+    assert failed_payload["result"]["error_code"] == "invariant_violation"
     assert failed_payload["result"]["failure_handoff"]["failed_invariant"] == "claims.active <= claims.capacity"
     assert failed_payload["result"]["failure_handoff"]["bundle_path"].endswith("race-failure/bundle.json")
     failure_bundle = webmcp / "runs" / "race-failure" / "bundle.json"
@@ -182,10 +183,14 @@ def test_cli_full_loop_replays_a_redacted_adversarial_failure(
     assert replayed.exit_code == 1, replayed.output
     replay_payload = decode(replayed.output)
     assert replay_payload["result"]["passed"] is False
+    assert replay_payload["result"]["error_code"] == "invariant_violation"
     replay_bundle = webmcp / "runs" / "race-replay" / "bundle.json"
     replay_json = json.loads(replay_bundle.read_text())
     assert replay_json["execution"]["schedule"] == failure_json["execution"]["schedule"]
     assert replay_json["execution"]["scheduler"]["selected_logical_schedule"] == scheduler["selected_logical_schedule"]
+    # Same deterministic classification on both sides, not just the same pass/fail outcome.
+    assert replay_json["result"]["error_code"] == failure_json["result"]["error_code"] == "invariant_violation"
+    assert replay_json["compatibility"]["tool_inventory_fingerprint"] == failure_json["compatibility"]["tool_inventory_fingerprint"]
 
     diff = runner.invoke(app, ["diff", str(failure_bundle), str(replay_bundle), "--json"])
     assert diff.exit_code == 0, diff.output

@@ -3,7 +3,9 @@ from typing import Any
 
 
 class InvariantError(AssertionError):
-    pass
+    """A declared invariant failed, or its expression could not be evaluated."""
+
+    code = "invariant_violation"
 
 
 def validate_syntax(expression: str) -> None:
