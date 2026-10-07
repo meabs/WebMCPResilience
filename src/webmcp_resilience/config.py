@@ -6,6 +6,15 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+class ToolContractDriftPolicy(BaseModel):
+    """Severity assigned to each persisted, classifiable contract difference."""
+
+    schema_changed: Literal["error", "warning"] = "error"
+    annotation_changed: Literal["error", "warning"] = "error"
+    annotation_added: Literal["error", "warning"] = "warning"
+    description_changed: Literal["error", "warning"] = "error"
+
+
 class Config(BaseModel):
     base_url: str = "http://localhost:3000"
     browser: str = "chromium"
@@ -33,6 +42,11 @@ class Config(BaseModel):
     # Descriptions are excluded from compatibility fingerprints by default.
     # Projects may explicitly opt in when prose is part of their contract.
     tool_contract_include_descriptions: bool = False
+    # This policy is saved with new bundles so replay uses the rule that
+    # classified the original contract, not a later machine-local setting.
+    tool_contract_drift_policy: ToolContractDriftPolicy = Field(
+        default_factory=ToolContractDriftPolicy
+    )
 
 
 def load_config(project: Path = Path(".webmcp")) -> Config:

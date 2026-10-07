@@ -183,19 +183,33 @@ against a live application at that origin; start the application before replay.
 Replay always retains and compares the canonical recorded tool-inventory
 fingerprint. A changed fingerprint is classified using the bundle's saved
 `fingerprint_policy`, never the current machine's configuration. By default,
-replay permits only proven-compatible drift: optional input fields added,
-required inputs made optional, optional output fields added, and description
-changes when descriptions were excluded from that saved policy. Tool removals,
-new required inputs, narrowed input types or enums, narrowed/removed outputs,
-and `readOnlyHint` or `destructiveHint` changes are breaking and reject. Any
-other change is unknown and rejects. `--strict-tool-contracts` rejects every
-fingerprint drift, including compatible drift.
+an added annotation is a warning and replay permits it. Schema changes,
+changes to existing annotations, and description changes when descriptions
+were included in the saved fingerprint are errors and reject. Tool additions
+and removals retain their existing compatible and breaking classifications.
+`--strict-tool-contracts` rejects every fingerprint drift, including warnings.
 Description-only edits remain an exact match under strict mode when the saved
 policy excluded descriptions, because they never change that canonical
 fingerprint; they remain visible in `descriptive_only_changes` diagnostics.
 
+Configure classified drift severities in `.webmcp/config.yaml`. The policy is
+saved in new bundles, so a replay uses the policy that produced its recorded
+contract rather than a later machine-local setting:
+
+```yaml
+tool_contract_drift_policy:
+  schema_changed: error
+  annotation_changed: error
+  annotation_added: warning
+  description_changed: error
+```
+
+Each value is `error` or `warning`. `description_changed` applies only when
+`tool_contract_include_descriptions: true`.
+
 Every replay bundle records the baseline and live fingerprints, saved policy,
-full per-tool drift report, policy impact, and `tool_contract_replay_decision`.
+categories, full per-tool drift report, policy impact, and
+`tool_contract_replay_decision`.
 Rejected replays return structured `tool_contract_drift`, `policy_impact`,
 `replay_decision`, and per-tool reasons in CLI JSON and local MCP responses.
 Before a browser opens, replay rebuilds the canonical contract from the saved
@@ -212,12 +226,10 @@ scenario, schedules, trace, state observations, policy approvals, artifacts,
 result, and replay command.
 
 `webmcp diff` and the console baseline comparison keep tool compatibility drift
-separate from behavioural drift. They report added, removed, changed input,
-changed output, changed annotations, descriptive-only, and unchanged tools.
-Breaking changes include removals, newly required inputs, narrowed enum/type,
-safety-annotation changes, and incompatible output shapes. Optional inputs and
-descriptive-only changes are compatible; unrecognized schema changes are
-reported as unknown for human review.
+separate from behavioural drift. Their additive `categories` evidence reports
+`schema_changed`, `annotation_changed`, `annotation_added`, and (when enabled)
+`description_changed`, alongside the existing added, removed, schema,
+annotation, descriptive-only, and unchanged-tool details.
 
 Textual structured evidence and URL credentials are recursively redacted.
 Screenshots are marked potentially sensitive and remain metadata-only through

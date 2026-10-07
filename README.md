@@ -143,6 +143,11 @@ browser_args: ["--enable-features=WebMCPTesting"]
 # Optional: reset a server-backed test app before each run.
 # reset_script: "await fetch('/test/reset', {method: 'POST'})"
 # initial_state: {claims: {active: 0, capacity: 1}}
+# Optional: choose whether each classified tool-contract drift blocks replay.
+# annotation_added defaults to warning so newly introduced browser annotations
+# (such as Chrome's debugging annotation) do not fail an otherwise compatible replay.
+# tool_contract_drift_policy:
+#   annotation_added: error  # error | warning
 ```
 
 `state_script` tells WebMCP Resilience exactly what app state to check. It does

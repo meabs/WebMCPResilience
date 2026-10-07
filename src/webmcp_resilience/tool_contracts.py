@@ -17,6 +17,18 @@ from .models.bundle import redact_recursive
 
 TOOL_CONTRACT_VERSION = "1.0"
 _DESCRIPTION_KEYS = {"description", "$comment"}
+DRIFT_CATEGORIES = (
+    "schema_changed",
+    "annotation_changed",
+    "annotation_added",
+    "description_changed",
+)
+DEFAULT_DRIFT_POLICY = {
+    "schema_changed": "error",
+    "annotation_changed": "error",
+    "annotation_added": "warning",
+    "description_changed": "error",
+}
 _SECRET_KEY = re.compile(
     r"(?:token|secret|password|credential|authorization|cookie|api[-_]?key|signature|access[-_]?key)",
     re.I,
@@ -224,7 +236,10 @@ def redact_inventory_contract(evidence: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def build_inventory_contract(
-    inventory: Iterable[Mapping[str, Any]], *, include_descriptions: bool = False
+    inventory: Iterable[Mapping[str, Any]],
+    *,
+    include_descriptions: bool = False,
+    drift_policy: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build stable per-tool and complete inventory fingerprints plus summary."""
     tools: list[dict[str, Any]] = []
@@ -244,6 +259,7 @@ def build_inventory_contract(
             "include_descriptions": include_descriptions,
             "volatile_runtime_fields": "excluded",
             "redacted": True,
+            "drift_policy": normalize_drift_policy(drift_policy),
         },
         "inventory_fingerprint": inventory_fingerprint,
         "tools": tools,
@@ -268,6 +284,8 @@ def no_contract_comparison(*, inventory_fingerprint: str | None = None) -> dict[
         "changed_output_schemas": [],
         "changed_annotations": [],
         "descriptive_only_changes": [],
+        "categories": {category: [] for category in DRIFT_CATEGORIES},
+        "drift_policy": normalize_drift_policy(),
         "unchanged_tools": [],
         "details": {},
     }
@@ -369,6 +387,26 @@ def _impact(values: Iterable[str]) -> str:
     return max(values, key=lambda item: ranked[item], default="none")
 
 
+def normalize_drift_policy(policy: Mapping[str, Any] | None = None) -> dict[str, str]:
+    """Return a complete, validated classification policy suitable for evidence."""
+    result = dict(DEFAULT_DRIFT_POLICY)
+    if policy is None:
+        return result
+    for category in DRIFT_CATEGORIES:
+        value = policy.get(category)
+        if value is not None:
+            if value not in {"error", "warning"}:
+                raise ValueError(
+                    f"unsupported tool-contract drift severity for {category}: {value!r}"
+                )
+            result[category] = value
+    return result
+
+
+def _category_impact(category: str, policy: Mapping[str, str]) -> str:
+    return "breaking" if policy[category] == "error" else "compatible"
+
+
 def _descriptor_map(inventory: Iterable[Mapping[str, Any]]) -> dict[str, Mapping[str, Any]]:
     return {
         str(tool.get("name")): tool
@@ -382,8 +420,10 @@ def compare_tool_inventories(
     current: Iterable[Mapping[str, Any]],
     *,
     include_descriptions: bool = False,
+    drift_policy: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compare two inventories and keep contract drift separate from behaviour."""
+    effective_policy = normalize_drift_policy(drift_policy)
     left, right = _descriptor_map(baseline), _descriptor_map(current)
     left_contract = build_inventory_contract(
         left.values(), include_descriptions=include_descriptions
@@ -399,6 +439,7 @@ def compare_tool_inventories(
     descriptive: list[str] = []
     unchanged: list[str] = []
     details: dict[str, Any] = {}
+    categories: dict[str, list[str]] = {category: [] for category in DRIFT_CATEGORIES}
     impacts: list[str] = ["compatible" for _ in added] + ["breaking" for _ in removed]
 
     for name in added:
@@ -409,6 +450,17 @@ def compare_tool_inventories(
     for name in sorted(set(left) & set(right)):
         before, after = left[name], right[name]
         changes: list[dict[str, Any]] = []
+
+        def add_change(category: str, kind: str, summary: str) -> None:
+            if name not in categories[category]:
+                categories[category].append(name)
+            changes.append({
+                "category": category,
+                "kind": kind,
+                "summary": summary,
+                "policy_impact": _category_impact(category, effective_policy),
+            })
+
         for key, report_key, output in (
             ("inputSchema", changed_input, False),
             ("outputSchema", changed_output, True),
@@ -421,26 +473,36 @@ def compare_tool_inventories(
             )
             if structural_before != structural_after:
                 report_key.append(name)
-                policy, reasons = _schema_policy(structural_before, structural_after, output=output)
-                changes.append({
-                    "kind": "output_schema" if output else "input_schema",
-                    "summary": "; ".join(reasons),
-                    "policy_impact": policy,
-                })
+                _, reasons = _schema_policy(structural_before, structural_after, output=output)
+                add_change(
+                    "schema_changed",
+                    "output_schema" if output else "input_schema",
+                    "; ".join(reasons),
+                )
         annotations_before = _without_descriptions(_redact_contract(before.get("annotations")))
         annotations_after = _without_descriptions(_redact_contract(after.get("annotations")))
         if annotations_before != annotations_after:
             changed_annotations.append(name)
-            sensitive_hints = {"readOnlyHint", "destructiveHint"}
             before_hints = annotations_before if isinstance(annotations_before, dict) else {}
             after_hints = annotations_after if isinstance(annotations_after, dict) else {}
+            added_hints = sorted(set(after_hints) - set(before_hints))
             changed_hints = sorted(
-                key for key in sensitive_hints
-                if before_hints.get(key) != after_hints.get(key)
+                key for key in set(before_hints) & set(after_hints)
+                if before_hints[key] != after_hints[key]
             )
-            policy = "breaking" if changed_hints else "unknown"
-            summary = f"safety annotations changed: {', '.join(changed_hints)}" if changed_hints else "annotations changed and need human review"
-            changes.append({"kind": "annotations", "summary": summary, "policy_impact": policy})
+            removed_hints = sorted(set(before_hints) - set(after_hints))
+            if added_hints:
+                add_change(
+                    "annotation_added",
+                    "annotations",
+                    f"annotations added: {', '.join(added_hints)}",
+                )
+            if changed_hints or removed_hints:
+                add_change(
+                    "annotation_changed",
+                    "annotations",
+                    f"annotations changed: {', '.join(changed_hints + removed_hints)}",
+                )
 
         compatibility_before = canonical_tool(before)
         compatibility_after = canonical_tool(after)
@@ -449,11 +511,11 @@ def compare_tool_inventories(
         if full_before.get("description") != full_after.get("description"):
             descriptive.append(name)
             if include_descriptions:
-                changes.append({
-                    "kind": "description",
-                    "summary": "description changed under recorded fingerprint policy",
-                    "policy_impact": "unknown",
-                })
+                add_change(
+                    "description_changed",
+                    "description",
+                    "description changed under recorded fingerprint policy",
+                )
         if changes:
             tool_impact = _impact(change["policy_impact"] for change in changes)
             impacts.append(tool_impact)
@@ -476,6 +538,8 @@ def compare_tool_inventories(
         "changed_output_schemas": changed_output,
         "changed_annotations": changed_annotations,
         "descriptive_only_changes": descriptive,
+        "categories": categories,
+        "drift_policy": effective_policy,
         "unchanged_tools": unchanged,
         "details": details,
     }
