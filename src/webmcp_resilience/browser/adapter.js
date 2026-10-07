@@ -1,5 +1,12 @@
 (() => {
-  const context = () => document.modelContext ?? navigator.modelContext;
+  const primaryContext = () => document.modelContext;
+  const legacyNavigatorContext = () => {
+    // Chrome documents document.modelContext as the canonical entry point.
+    // Keep this isolated fallback for pages on older WebMCP surfaces, where
+    // navigator.modelContext is the only available API.
+    return navigator.modelContext;
+  };
+  const context = () => primaryContext() ?? legacyNavigatorContext();
   const requireContext = () => {
     const value = context();
     if (!value) throw new Error("WebMCP is unavailable: document.modelContext was not exposed by this browser/page.");
@@ -99,7 +106,8 @@
       return events;
     },
     probe() {
-      const host = context();
+      const documentContext = primaryContext();
+      const host = documentContext ?? legacyNavigatorContext();
       const compatibilityHost = Boolean(host?.__webmcpResilienceCompatibilityHost);
       const nativeHost = Boolean(host) && !compatibilityHost;
       const topOrigin = (() => { try { return window.top?.location?.origin || null; } catch (_) { return null; } })();
@@ -118,7 +126,7 @@
       const tools = host?.getTools ? [] : null; // Never call it: this evidence probe is non-mutating and API-shape only.
       return {
         api: {
-          available: Boolean(host), location: document.modelContext ? 'document.modelContext' : navigator.modelContext ? 'navigator.modelContext' : null,
+          available: Boolean(host), location: documentContext ? 'document.modelContext' : host ? 'navigator.modelContext' : null,
           mode: nativeHost ? 'native' : compatibilityHost ? 'compatibility_host' : 'unavailable',
           native: nativeHost,
           compatibilityHost,

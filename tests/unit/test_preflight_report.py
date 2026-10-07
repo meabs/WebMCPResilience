@@ -10,7 +10,7 @@ def probe(*, available: bool = True) -> dict:
     return {
         "api": {
             "available": available,
-            "location": "navigator.modelContext" if available else None,
+            "location": "document.modelContext" if available else None,
             "mode": "native" if available else "unavailable",
             "native": available,
             "compatibilityHost": False,
@@ -134,6 +134,7 @@ def test_command_preflight_never_invokes_a_page_tool(tmp_path: Path, monkeypatch
     bundle = asyncio.run(CommandAPI(Config(base_url="https://app.example")).preflight(run_id="preflight-check"))
     assert "invoke_tool" not in calls
     assert bundle.preflight["non_mutating"] is True
+    assert bundle.preflight["webmcp"]["api"]["location"] == "document.modelContext"
     assert bundle.browser_environment["version"] == "123.0"
     assert bundle.browser_environment["channel"] == "default"
     assert bundle.compatibility.tool_inventory_fingerprint
