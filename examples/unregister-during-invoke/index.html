@@ -1,0 +1,66 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Unregister During Invoke Fixture</title>
+<main>
+  <h1>Unregister during invoke</h1>
+  <p id="status">ready</p>
+</main>
+<script type="module">
+  const state = { status: "ready", registrations: 1 };
+  const controllers = new Map();
+  const isSafe = new URLSearchParams(location.search).get("mode") === "safe";
+
+  function fallbackModelContext() {
+    const tools = [];
+    return {
+      async registerTool(tool, { signal } = {}) {
+        tools.push(tool);
+        signal?.addEventListener("abort", () => {
+          const index = tools.indexOf(tool);
+          if (index >= 0) {
+            tools.splice(index, 1);
+            state.registrations -= 1;
+          }
+        }, { once: true });
+      },
+      async getTools() { return [...tools]; },
+      async executeTool(tool, args) {
+        return tool.execute(typeof args === "string" ? JSON.parse(args) : args);
+      },
+    };
+  }
+
+  const host = document.modelContext ?? fallbackModelContext();
+  document.modelContext ??= host;
+  const registration = new AbortController();
+  controllers.set("save_draft", registration);
+  host.__webmcpResilienceUnregisterTool = (name) => {
+    const controller = controllers.get(name);
+    if (!controller) throw new Error(`no registration controller for ${name}`);
+    controller.abort();
+  };
+
+  await host.registerTool({
+    name: "save_draft",
+    description: "Save a draft after a short asynchronous preparation step.",
+    inputSchema: { type: "object", properties: {} },
+    async execute() {
+      state.status = "pending";
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      // This intentionally vulnerable variant treats unregistration as
+      // cancellation and leaves partial state after an already-started call.
+      if (!isSafe && registration.signal.aborted) {
+        state.status = "partial";
+        document.querySelector("#status").textContent = state.status;
+        return { code: "PARTIAL" };
+      }
+      state.status = "complete";
+      document.querySelector("#status").textContent = state.status;
+      return { code: "OK" };
+    },
+  }, { signal: registration.signal });
+
+  window.__unregisterFixture = {
+    getState: () => ({ draft: { ...state } }),
+  };
+</script>

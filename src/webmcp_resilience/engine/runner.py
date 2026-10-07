@@ -16,6 +16,7 @@ from ..faults.latency import delay_for
 from ..faults.http import http_route, response_handler
 from ..faults.navigation import navigates, navigation_url
 from ..faults.timeout import timeout_for
+from ..faults.unregister import unregisters_during_invoke
 from ..models.scenario import Scenario, TimedAction
 from ..models.bundle import redact_recursive
 from ..models.trace import TraceRun
@@ -283,7 +284,11 @@ class ScenarioRunner:
             await self._check_invariants(actor)
 
     def _can_prestart(self, name: str) -> bool:
-        return not any(self._fault_due(fault, name, "before_invoke") for fault in self.faults)
+        return not any(
+            self._fault_due(fault, name, "before_invoke")
+            and not unregisters_during_invoke(fault, name)
+            for fault in self.faults
+        )
 
     async def _record_lifecycle(self) -> None:
         if self._adapter_stale and self.scenario.allow_navigation:
@@ -364,7 +369,12 @@ class ScenarioRunner:
             self.recorder.add(actor, "action.requested", name=name, invocation_id=invocation_id,
                               data={"operation": event, "args": arguments})
             self.recorder.add(actor, event, name=name, invocation_id=invocation_id, data={"args": arguments})
-            if prestart_tool:
+            unregister_fault_due = any(
+                self._fault_due(fault, name, "before_invoke")
+                and unregisters_during_invoke(fault, name)
+                for fault in self.faults
+            )
+            if prestart_tool or unregister_fault_due:
                 try:
                     await self._start_adapter(name, arguments, invocation_id, descriptor)
                 except Exception as error:
@@ -391,6 +401,12 @@ class ScenarioRunner:
                 elif self._fault_due(fault, name, "before_invoke") and cancels(fault, name):
                     self.recorder.add("system", "fault.injected", name="cancellation", data={"tool": name})
                     self.background.append(asyncio.create_task(self._cancel_after_yield(invocation_id, name)))
+                elif self._fault_due(fault, name, "before_invoke") and unregisters_during_invoke(fault, name):
+                    self.background.append(
+                        asyncio.create_task(
+                            self._unregister_after_yield(invocation_id, name, descriptor)
+                        )
+                    )
                 elif self._fault_due(fault, name, "before_invoke") and navigates(fault):
                     self.recorder.add("system", "fault.injected", name="navigation", data={"url": fault.url})
                     self.background.append(asyncio.create_task(self.page.goto(self._navigation_target(navigation_url(fault)) or self.page.url)))
@@ -540,6 +556,35 @@ class ScenarioRunner:
             await self.adapter.cancel(invocation_id)
             task.cancel()
             self.recorder.add("system", "tool.cancel", name=name, invocation_id=invocation_id)
+
+    async def _unregister_after_yield(
+        self, invocation_id: str, name: str, descriptor: dict[str, Any]
+    ) -> None:
+        """Abort registration after the page has started the selected tool."""
+        await asyncio.sleep(0)
+        try:
+            outcome = await self.adapter.unregister_tool(name, descriptor)
+        except Exception as error:
+            outcome = {
+                "applied": False,
+                "reason": f"unregister capability probe failed: {error}",
+            }
+        if outcome.get("applied"):
+            self.recorder.add(
+                "system",
+                "fault.injected",
+                name="unregister_during_invoke",
+                invocation_id=invocation_id,
+                data={"tool": name, "chrome_major": outcome.get("chrome_major")},
+            )
+        else:
+            self.recorder.add(
+                "system",
+                "fault.skipped",
+                name="unregister_during_invoke",
+                invocation_id=invocation_id,
+                data={"tool": name, "reason": outcome.get("reason", "capability unavailable")},
+            )
 
     async def _apply_after_invoke_faults(self, actor: str, name: str, args: dict[str, Any]) -> None:
         """Apply the explicitly supported post-result timing without implicit fallbacks."""

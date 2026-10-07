@@ -1418,6 +1418,7 @@ class CommandAPI:
         supported_bundle_versions = {
             "2.0": "webmcp-resilience/2",
             "3.0": "webmcp-resilience/3",
+            "4.0": "webmcp-resilience/4",
         }
         if (
             supported_bundle_versions.get(saved.schema_version) != saved.compatibility.runner

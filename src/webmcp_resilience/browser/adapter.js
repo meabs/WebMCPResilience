@@ -95,6 +95,34 @@
       controller.abort();
       return true;
     },
+    async unregisterTool(name, handleId = null) {
+      const match = navigator.userAgent.match(/(?:Chrome|Chromium)\/(\d+)/);
+      const chromeMajor = match ? Number(match[1]) : null;
+      if (chromeMajor === null || chromeMajor < 153) {
+        return {
+          applied: false,
+          reason: `unregister_during_invoke requires Chrome 153+; detected ${chromeMajor ?? 'unknown'}`,
+        };
+      }
+      const host = requireContext();
+      const unregister = host.__webmcpResilienceUnregisterTool;
+      if (typeof unregister !== 'function') {
+        return {
+          applied: false,
+          reason: 'target does not expose an unregister testing hook backed by its registration AbortSignal',
+        };
+      }
+      const tool = handleId ? this.toolHandles.get(handleId) : null;
+      try {
+        await unregister(name, tool);
+        return { applied: true, chrome_major: chromeMajor };
+      } catch (error) {
+        return {
+          applied: false,
+          reason: `unregister testing hook failed: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
+    },
     async getState(script) {
       if (!script) return {};
       return await (0, eval)(script);

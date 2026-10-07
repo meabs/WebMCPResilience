@@ -1,0 +1,10 @@
+name: unregister-during-invoke-safe
+url: /?mode=safe
+actors:
+  agent:
+    - invoke: save_draft
+faults:
+  - type: unregister_during_invoke
+    tool: save_draft
+final_invariants:
+  - draft.status == "complete"

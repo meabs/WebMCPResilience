@@ -1,0 +1,12 @@
+name: unregister-during-invoke-vulnerable
+url: /?mode=vulnerable
+actors:
+  agent:
+    - invoke: save_draft
+faults:
+  - type: unregister_during_invoke
+    tool: save_draft
+final_invariants:
+  - draft.status == "complete"
+metadata:
+  expected_failure: "The vulnerable handler treats registration abort as invocation cancellation and leaves partial draft state."

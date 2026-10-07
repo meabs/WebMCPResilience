@@ -17,8 +17,8 @@ from .scenario import Scenario
 from .trace import TraceRun
 
 
-BUNDLE_VERSION = "3.0"
-COMPATIBILITY_VERSION = "webmcp-resilience/3"
+BUNDLE_VERSION = "4.0"
+COMPATIBILITY_VERSION = "webmcp-resilience/4"
 ENGINE_VERSION = "0.1.0"
 # These are semantic contracts, not a grab-bag of optional feature flags.  A
 # replay may proceed only when every recorded group/version is installed.
