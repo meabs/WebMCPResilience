@@ -30,6 +30,7 @@ from .tool_contracts import (
     compare_tool_inventories,
     concise_drift_lines,
     no_contract_comparison,
+    normalize_drift_policy,
     redact_tool_inventory,
     tool_contract_replay_decision,
     validate_contract_expectations,
@@ -185,6 +186,7 @@ def build_webmcp_compatibility_report(
     inventory_checked_after_grace: bool = False,
     state_observation: StateObservation | None = None,
     include_contract_descriptions: bool = False,
+    drift_policy: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Build the browser-native, non-mutating WebMCP compatibility report."""
     api = probe.get("api", {})
@@ -200,12 +202,15 @@ def build_webmcp_compatibility_report(
     added = sorted(set(after_names) - set(before_names))
     removed = sorted(set(before_names) - set(after_names))
     inventory_contract = build_inventory_contract(
-        inventory, include_descriptions=include_contract_descriptions
+        inventory,
+        include_descriptions=include_contract_descriptions,
+        drift_policy=drift_policy,
     )
     contract_drift = compare_tool_inventories(
         baseline_inventory,
         inventory,
         include_descriptions=include_contract_descriptions,
+        drift_policy=drift_policy,
     )
     findings: list[dict[str, Any]] = []
 
@@ -707,6 +712,7 @@ class CommandAPI:
                 inventory_checked_after_grace=inventory_checked_after_grace,
                 state_observation=state_observation,
                 include_contract_descriptions=self.config.tool_contract_include_descriptions,
+                drift_policy=self.config.tool_contract_drift_policy.model_dump(),
             )
             fingerprint = hashlib.sha256(json.dumps(redacted(report), sort_keys=True).encode()).hexdigest()[:16]
             bundle.compatibility = Compatibility(
@@ -1061,6 +1067,16 @@ class CommandAPI:
             if contract_include_descriptions is None
             else contract_include_descriptions
         )
+        recorded_policy = (
+            replay_fingerprint_policy.get("drift_policy")
+            if isinstance(replay_fingerprint_policy, dict)
+            else None
+        )
+        contract_drift_policy = (
+            recorded_policy
+            if isinstance(recorded_policy, dict)
+            else self.config.tool_contract_drift_policy.model_dump()
+        )
         self._validate_scenario_semantics(scenario)
         _validate_state_requirements(self.config, scenario)
         try:
@@ -1203,6 +1219,7 @@ class CommandAPI:
                 live_contract = build_inventory_contract(
                     available_tools,
                     include_descriptions=include_contract_descriptions,
+                    drift_policy=contract_drift_policy,
                 )
                 bundle.tool_inventory = redact_tool_inventory(available_tools)
                 bundle.inventory_contract = live_contract
@@ -1212,9 +1229,11 @@ class CommandAPI:
                         expected_tool_inventory or [],
                         available_tools,
                         include_descriptions=include_contract_descriptions,
+                        drift_policy=contract_drift_policy,
                     )
                     contract_drift["fingerprint_policy"] = replay_fingerprint_policy or {
-                        "include_descriptions": include_contract_descriptions
+                        "include_descriptions": include_contract_descriptions,
+                        "drift_policy": contract_drift_policy,
                     }
                     # Keep the rebuilt baseline and recorded fingerprint as
                     # distinct evidence.  Replay evidence validation has
@@ -1396,7 +1415,14 @@ class CommandAPI:
             saved = RunBundle.model_validate_json(path.read_text())
         except Exception as error:
             raise CommandError(f"unsafe replay rejected: {path} is not a versioned run bundle: {error}") from error
-        if saved.schema_version != "2.0" or saved.compatibility.runner != "webmcp-resilience/2" or not saved.scenario:
+        supported_bundle_versions = {
+            "2.0": "webmcp-resilience/2",
+            "3.0": "webmcp-resilience/3",
+        }
+        if (
+            supported_bundle_versions.get(saved.schema_version) != saved.compatibility.runner
+            or not saved.scenario
+        ):
             raise CommandError("unsafe replay rejected: incompatible bundle version or missing scenario")
         self._validate_replay_inventory_evidence(saved)
         if saved.compatibility.browser and saved.compatibility.browser != self.config.browser:
@@ -1508,14 +1534,17 @@ def diff_bundles(left: RunBundle, right: RunBundle) -> dict[str, Any]:
                     "headless": left.compatibility.headless, "fingerprint": left.compatibility.capability_fingerprint}
     browser_right = {"browser": right.compatibility.browser, "version": right.compatibility.browser_version,
                      "headless": right.compatibility.headless, "fingerprint": right.compatibility.capability_fingerprint}
-    def recorded_fingerprint_policy(bundle: RunBundle) -> dict[str, bool]:
+    def recorded_fingerprint_policy(bundle: RunBundle) -> dict[str, Any]:
         policy = bundle.inventory_contract.get("fingerprint_policy", {})
         return {
             "include_descriptions": (
                 policy.get("include_descriptions") is True
                 if isinstance(policy, dict)
                 else False
-            )
+            ),
+            "drift_policy": normalize_drift_policy(
+                policy.get("drift_policy") if isinstance(policy, dict) else None
+            ),
         }
 
     def recorded_inventory_fingerprint(bundle: RunBundle) -> str | None:
@@ -1533,6 +1562,7 @@ def diff_bundles(left: RunBundle, right: RunBundle) -> dict[str, Any]:
             left.tool_inventory,
             right.tool_inventory,
             include_descriptions=left_policy["include_descriptions"],
+            drift_policy=left_policy["drift_policy"],
         )
         tool_contract_drift["fingerprint_policy"] = left_policy
         tool_contract_drift["policy_mismatch"] = None
@@ -1558,6 +1588,8 @@ def diff_bundles(left: RunBundle, right: RunBundle) -> dict[str, Any]:
             "changed_output_schemas": [],
             "changed_annotations": [],
             "descriptive_only_changes": [],
+            "categories": {},
+            "drift_policy": None,
             "unchanged_tools": [],
             "details": {},
         }

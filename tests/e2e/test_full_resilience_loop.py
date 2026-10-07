@@ -192,6 +192,27 @@ def test_cli_full_loop_replays_a_redacted_adversarial_failure(
     assert replay_json["result"]["error_code"] == failure_json["result"]["error_code"] == "invariant_violation"
     assert replay_json["compatibility"]["tool_inventory_fingerprint"] == failure_json["compatibility"]["tool_inventory_fingerprint"]
 
+    # Version 3 adds persisted drift categories. Version 2 bundles lack that
+    # policy, but must remain replayable under the version-2 compatibility
+    # contract.
+    legacy_bundle = tmp_path / "version-2-bundle.json"
+    legacy_payload = json.loads(json.dumps(failure_json))
+    legacy_payload["schema_version"] = "2.0"
+    legacy_payload["contract_version"] = "2.0"
+    legacy_payload["compatibility"]["bundle_version"] = "2.0"
+    legacy_payload["compatibility"]["runner"] = "webmcp-resilience/2"
+    legacy_payload["inventory_contract"]["fingerprint_policy"].pop("drift_policy", None)
+    legacy_bundle.write_text(json.dumps(legacy_payload))
+    legacy_replayed = runner.invoke(
+        app,
+        [
+            "replay", str(legacy_bundle), "--ci", "--allow-mutations",
+            "--run-id", "version-2-replay", "--json",
+        ],
+    )
+    assert legacy_replayed.exit_code == 1, legacy_replayed.output
+    assert decode(legacy_replayed.output)["result"]["error_code"] == "invariant_violation"
+
     diff = runner.invoke(app, ["diff", str(failure_bundle), str(replay_bundle), "--json"])
     assert diff.exit_code == 0, diff.output
     assert decode(diff.output)["result_changed"] is False
