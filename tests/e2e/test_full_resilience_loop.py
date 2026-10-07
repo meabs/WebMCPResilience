@@ -60,22 +60,36 @@ def decode(output: str) -> dict:
     raise AssertionError(f"no JSON response in output: {output!r}")
 
 
-def contract_page(*, quantity_required: bool) -> str:
+def contract_page(*, quantity_required: bool, chrome_major: int | None = None) -> str:
     required = ", required: ['quantity']" if quantity_required else ""
+    result_code = (
+        "argumentMode === 'object' ? 'OBJECT' : 'STRING'"
+        if chrome_major is not None
+        else "'OK'"
+    )
+    browser_version = (
+        f"Object.defineProperty(navigator, 'userAgent', {{configurable: true, value: 'Mozilla/5.0 Chrome/{chrome_major}.0.0.0 Safari/537.36'}});"
+        if chrome_major is not None
+        else ""
+    )
     return f"""<!doctype html><html><body><script type="module">
 const tools = [];
+{browser_version}
 document.modelContext = {{
   __webmcpResilienceCompatibilityHost: true,
   async registerTool(tool) {{ tools.push(tool); }},
   async getTools() {{ return tools; }},
-  async executeTool(tool, json) {{ return tool.execute(JSON.parse(json)); }},
+  async executeTool(tool, args) {{
+    const input = typeof args === 'string' ? JSON.parse(args) : args;
+    return tool.execute(input, {{argumentMode: typeof args}});
+  }},
 }};
 await document.modelContext.registerTool({{
   name: 'reserve_inventory',
   inputSchema: {{type: 'object', properties: {{quantity: {{type: 'integer'}}}}{required}}},
   outputSchema: {{type: 'object', properties: {{code: {{type: 'string'}}}}, required: ['code']}},
   annotations: {{readOnlyHint: true, semanticVersion: '1'}},
-  execute: () => ({{code: 'OK'}}),
+  execute: (_args, {{argumentMode}}) => ({{code: {result_code}}}),
 }});
 </script></body></html>"""
 
@@ -295,6 +309,51 @@ def test_browser_backed_replay_rejects_changed_tool_contract(tmp_path: Path) -> 
         assert caught.value.code == "tool_contract_drift"
         assert caught.value.details["changed_input_schemas"] == ["reserve_inventory"]
         assert caught.value.details["policy_impact"] == "breaking"
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+
+def test_replay_uses_structured_arguments_on_chrome_155_or_later(tmp_path: Path) -> None:
+    site = tmp_path / "structured-arguments-site"
+    site.mkdir()
+    (site / "index.html").write_text(
+        contract_page(quantity_required=False, chrome_major=155)
+    )
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", 0), partial(_QuietDirectoryHandler, directory=str(site))
+    )
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        api = CommandAPI(
+            Config(base_url=base_url),
+            output_dir=tmp_path / ".webmcp" / "runs",
+        )
+        scenario = {
+            "name": "structured-argument-replay",
+            "actors": {"agent": [{"invoke": "reserve_inventory", "args": {"quantity": 1}}]},
+            "tool_contracts": {
+                "reserve_inventory": {
+                    "read_only": True,
+                    "expected_result_codes": ["OBJECT"],
+                }
+            },
+        }
+        baseline = asyncio.run(
+            api.run(scenario=scenario, run_id="structured-baseline", headless=True)
+        )
+        assert baseline.result["passed"] is True
+        assert baseline.compatibility.webmcp_argument_mode == "object"
+        saved = api.save(baseline)
+
+        replayed = asyncio.run(
+            api.replay(saved, run_id="structured-replay", headless=True)
+        )
+        assert replayed.result["passed"] is True
+        assert replayed.compatibility.webmcp_argument_mode == "object"
     finally:
         server.shutdown()
         thread.join()

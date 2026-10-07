@@ -77,9 +77,13 @@ function fallbackModelContext() {
   return {
     async registerTool(tool) { tools.push(tool); },
     async getTools() { return [...tools].sort((a, b) => a.name.localeCompare(b.name)); },
-    async executeTool(tool, json, { signal } = {}) {
+    async executeTool(tool, args, { signal } = {}) {
       if (signal?.aborted) throw new DOMException('Tool invocation aborted', 'AbortError');
-      return tool.execute(JSON.parse(json), { signal });
+      // The compatibility host accepts Chrome's pre-155 string arguments and
+      // Chrome 155+ structured arguments so adapter version-gate tests do not
+      // rely on an artificial host limitation.
+      const input = typeof args === 'string' ? JSON.parse(args) : (args ?? {});
+      return tool.execute(input, { signal });
     },
   };
 }
