@@ -147,3 +147,22 @@ async def test_auto_profile_preserves_string_arguments_for_compatibility_host(la
         await adapter.install()
         tools = await adapter.get_tools()
         assert tools[0]["argumentMode"] == "string"
+
+
+async def test_unregister_during_invoke_skips_before_chrome_153(lab_server: str) -> None:
+    async with BrowserClient() as client:
+        assert client.page
+        await client.page.goto(lab_server)
+        await client.page.evaluate("""() => {
+          Object.defineProperty(navigator, 'userAgent', {
+            configurable: true,
+            value: 'Mozilla/5.0 Chrome/152.0.0.0 Safari/537.36',
+          });
+        }""")
+        adapter = WebMCPAdapter(client.page)
+        await adapter.install()
+        tool = next(item for item in await adapter.get_tools() if item["name"] == "claim_slot")
+        outcome = await adapter.unregister_tool("claim_slot", tool)
+
+    assert outcome["applied"] is False
+    assert outcome["reason"] == "unregister_during_invoke requires Chrome 153+; detected 152"

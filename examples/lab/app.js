@@ -75,7 +75,13 @@ async function claimSlot({ actor = 'tool' } = {}) {
 function fallbackModelContext() {
   const tools = [];
   return {
-    async registerTool(tool) { tools.push(tool); },
+    async registerTool(tool, { signal } = {}) {
+      tools.push(tool);
+      signal?.addEventListener('abort', () => {
+        const index = tools.indexOf(tool);
+        if (index >= 0) tools.splice(index, 1);
+      }, { once: true });
+    },
     async getTools() { return [...tools].sort((a, b) => a.name.localeCompare(b.name)); },
     async executeTool(tool, args, { signal } = {}) {
       if (signal?.aborted) throw new DOMException('Tool invocation aborted', 'AbortError');
@@ -104,7 +110,17 @@ const tools = [
   { name: 'get_observable_state', description: 'Read the current session state without modifying it.', inputSchema: { type: 'object', properties: {} }, annotations: { readOnlyHint: true }, execute: snapshot },
   { name: 'claim_slot', description: 'Claim the single shared lab slot. This is intentionally vulnerable to a human/UI plus tool race.', inputSchema: { type: 'object', properties: { actor: { type: 'string', minLength: 1 } }, required: ['actor'] }, execute: claimSlot },
 ];
-await Promise.all(tools.map((tool) => host.registerTool(tool)));
+const registrationControllers = new Map(tools.map((tool) => [tool.name, new AbortController()]));
+await Promise.all(tools.map((tool) => host.registerTool(tool, {
+  signal: registrationControllers.get(tool.name).signal,
+})));
+if (!nativeWebMCP) {
+  host.__webmcpResilienceUnregisterTool = (name) => {
+    const controller = registrationControllers.get(name);
+    if (!controller) throw new Error(`tool ${name} has no registration controller`);
+    controller.abort();
+  };
+}
 window.__resilienceLab = { getState: snapshot };
 $('api-status').textContent = nativeWebMCP ? 'Native WebMCP active' : 'Fallback host active';
 $('tool-list').replaceChildren(...tools.map((tool) => { const item = document.createElement('li'); item.textContent = tool.name; return item; }));

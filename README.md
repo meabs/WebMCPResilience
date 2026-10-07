@@ -242,7 +242,8 @@ optional tool-contract assertions, see the [scenario and replay guide](docs/scen
 - **People and tools acting together** — describe actions by a person, an AI
   tool, or the system on one live page, at controlled times.
 - **Common failure conditions** — test slow responses, timeouts, duplicate
-  calls, cancellations, navigation, and HTTP failures deliberately.
+  calls, cancellations, unregister-during-invoke (Chrome 153+), navigation,
+  and HTTP failures deliberately.
 - **Useful failure evidence** — when a rule breaks, the tool reduces the run
   to the smallest case that still shows the problem and saves it for replay.
 - **Safe replay** — saved evidence checks that the browser and available tools

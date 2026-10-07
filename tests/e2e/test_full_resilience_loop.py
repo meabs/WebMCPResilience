@@ -206,26 +206,29 @@ def test_cli_full_loop_replays_a_redacted_adversarial_failure(
     assert replay_json["result"]["error_code"] == failure_json["result"]["error_code"] == "invariant_violation"
     assert replay_json["compatibility"]["tool_inventory_fingerprint"] == failure_json["compatibility"]["tool_inventory_fingerprint"]
 
-    # Version 3 adds persisted drift categories. Version 2 bundles lack that
-    # policy, but must remain replayable under the version-2 compatibility
-    # contract.
-    legacy_bundle = tmp_path / "version-2-bundle.json"
-    legacy_payload = json.loads(json.dumps(failure_json))
-    legacy_payload["schema_version"] = "2.0"
-    legacy_payload["contract_version"] = "2.0"
-    legacy_payload["compatibility"]["bundle_version"] = "2.0"
-    legacy_payload["compatibility"]["runner"] = "webmcp-resilience/2"
-    legacy_payload["inventory_contract"]["fingerprint_policy"].pop("drift_policy", None)
-    legacy_bundle.write_text(json.dumps(legacy_payload))
-    legacy_replayed = runner.invoke(
-        app,
-        [
-            "replay", str(legacy_bundle), "--ci", "--allow-mutations",
-            "--run-id", "version-2-replay", "--json",
-        ],
-    )
-    assert legacy_replayed.exit_code == 1, legacy_replayed.output
-    assert decode(legacy_replayed.output)["result"]["error_code"] == "invariant_violation"
+    # Version 4 adds unregister-during-invoke semantics. Version 2 and 3
+    # bundles remain replayable when their scenarios do not use that fault.
+    for version in ("2.0", "3.0"):
+        legacy_bundle = tmp_path / f"version-{version}-bundle.json"
+        legacy_payload = json.loads(json.dumps(failure_json))
+        legacy_payload["schema_version"] = version
+        legacy_payload["contract_version"] = version
+        legacy_payload["compatibility"]["bundle_version"] = version
+        legacy_payload["compatibility"]["runner"] = f"webmcp-resilience/{version[0]}"
+        if version == "2.0":
+            legacy_payload["inventory_contract"]["fingerprint_policy"].pop(
+                "drift_policy", None
+            )
+        legacy_bundle.write_text(json.dumps(legacy_payload))
+        legacy_replayed = runner.invoke(
+            app,
+            [
+                "replay", str(legacy_bundle), "--ci", "--allow-mutations",
+                "--run-id", f"version-{version}-replay", "--json",
+            ],
+        )
+        assert legacy_replayed.exit_code == 1, legacy_replayed.output
+        assert decode(legacy_replayed.output)["result"]["error_code"] == "invariant_violation"
 
     diff = runner.invoke(app, ["diff", str(failure_bundle), str(replay_bundle), "--json"])
     assert diff.exit_code == 0, diff.output
@@ -354,6 +357,78 @@ def test_replay_uses_structured_arguments_on_chrome_155_or_later(tmp_path: Path)
         )
         assert replayed.result["passed"] is True
         assert replayed.compatibility.webmcp_argument_mode == "object"
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+
+def test_unregister_during_invoke_fixture_fails_vulnerable_and_passes_safe(
+    tmp_path: Path,
+) -> None:
+    fixture_directory = (
+        Path(__file__).parents[2] / "examples" / "unregister-during-invoke"
+    )
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        partial(_QuietDirectoryHandler, directory=str(fixture_directory)),
+    )
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        api = CommandAPI(
+            Config(
+                base_url=base_url,
+                state_script="window.__unregisterFixture.getState()",
+            ),
+            output_dir=tmp_path / ".webmcp" / "runs",
+        )
+        vulnerable = yaml.safe_load(
+            (fixture_directory / "vulnerable.yaml").read_text()
+        )
+        failed = asyncio.run(
+            api.run(
+                scenario=vulnerable,
+                run_id="unregister-vulnerable",
+                headless=True,
+                allow_mutations=True,
+            )
+        )
+        assert failed.result["passed"] is False
+        assert failed.result["error_code"] == "invariant_violation"
+        assert any(
+            event.type == "fault.injected"
+            and event.name == "unregister_during_invoke"
+            for event in failed.trace.events
+        )
+        failure_path = api.save(failed)
+        replayed = asyncio.run(
+            api.replay(
+                failure_path,
+                run_id="unregister-vulnerable-replay",
+                headless=True,
+                allow_mutations=True,
+            )
+        )
+        assert replayed.result["passed"] is False
+        assert replayed.result["error_code"] == "invariant_violation"
+
+        safe = yaml.safe_load((fixture_directory / "safe.yaml").read_text())
+        passed = asyncio.run(
+            api.run(
+                scenario=safe,
+                run_id="unregister-safe",
+                headless=True,
+                allow_mutations=True,
+            )
+        )
+        assert passed.result["passed"] is True
+        assert any(
+            event.type == "fault.injected"
+            and event.name == "unregister_during_invoke"
+            for event in passed.trace.events
+        )
     finally:
         server.shutdown()
         thread.join()

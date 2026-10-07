@@ -14,7 +14,7 @@ def test_validate_emits_portable_versioned_bundle(tmp_path: Path) -> None:
     scenario = tmp_path / "scenario.yaml"
     scenario.write_text("name: portable\nactors:\n  agent:\n    - invoke: read_status\n")
     bundle = CommandAPI(Config()).validate(scenario, run_id="run-123")
-    assert bundle.schema_version == "3.0"
+    assert bundle.schema_version == "4.0"
     assert bundle.run_id == "run-123"
     assert bundle.actions[0]["invoke"] == "read_status"
     assert bundle.approvals == []

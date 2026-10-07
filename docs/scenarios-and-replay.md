@@ -125,10 +125,25 @@ prove unchanged business semantics.
 | `timeout` | `before_invoke` | Bounds the call duration. |
 | `duplicate_invocation` | `before_invoke`, `after_invoke` | Repeats the resolved call once. |
 | `cancellation` | `before_invoke` | Cancels an in-flight call. |
+| `unregister_during_invoke` | `before_invoke` | Aborts a tool registration while its invocation is pending. |
 | `navigation` | `before_invoke`, `after_invoke` | Performs declared browser navigation. |
 | `http_error` | `before_invoke` | Routes matching browser HTTP traffic to a declared response status. |
 
 Fault timing is explicit. Unsupported timing combinations are validation errors.
+
+`unregister_during_invoke` is capability-gated to Chrome 153 or later. The
+target must also expose the opt-in testing hook
+`__webmcpResilienceUnregisterTool`, backed by the `AbortController` used when
+that tool was registered. If either capability is absent, the runner records a
+`fault.skipped` event with the reason and continues the scenario without
+failing it. This reflects the browser API boundary: a page owns its
+registration signal, so the runner cannot safely invent one for an arbitrary
+application.
+
+The included [`examples/unregister-during-invoke`](../examples/unregister-during-invoke)
+fixture demonstrates both outcomes. Its vulnerable mode mistakes
+unregistration for invocation cancellation and leaves partial state; its safe
+mode lets the already-started invocation complete.
 
 ## Scheduling semantics
 

@@ -80,6 +80,15 @@ class WebMCPAdapter:
     async def cancel(self, invocation_id: str) -> bool:
         return await self.page.evaluate("id => window.__webmcp_resilience.cancel(id)", invocation_id)
 
+    async def unregister_tool(
+        self, name: str, descriptor: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Ask an opt-in test hook to abort the tool's registration signal."""
+        return await self.page.evaluate(
+            "([name, handle]) => window.__webmcp_resilience.unregisterTool(name, handle)",
+            [name, (descriptor or {}).get("handleId")],
+        )
+
     async def get_state(self) -> dict[str, Any]:
         state = await self.page.evaluate("script => window.__webmcp_resilience.getState(script)", self.state_script)
         if not isinstance(state, dict):

@@ -42,7 +42,8 @@ SUPPORTED_ACTIONS = ("invoke", "retry", "cancel", "click", "fill", "select", "na
 INVARIANT_OPERATORS = ("<", "<=", "==", "!=", ">", ">=")
 TEMPLATE_FOCUSES = (
     "basic", "concurrency", "retry", "cancellation", "latency",
-    "timeout", "http_error", "duplicate_invocation", "navigation",
+    "timeout", "http_error", "duplicate_invocation", "unregister_during_invoke",
+    "navigation",
 )
 
 

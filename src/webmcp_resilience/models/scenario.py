@@ -7,6 +7,7 @@ SUPPORTED_FAULT_TIMINGS: dict[str, set[str]] = {
     "latency": {"before_invoke", "after_invoke"},
     "duplicate_invocation": {"before_invoke", "after_invoke"},
     "cancellation": {"before_invoke"},
+    "unregister_during_invoke": {"before_invoke"},
     "navigation": {"before_invoke", "after_invoke"},
     "timeout": {"before_invoke"},
     "http_error": {"before_invoke"},
@@ -47,7 +48,7 @@ class TimedAction(BaseModel):
 
 
 class Fault(BaseModel):
-    type: Literal["latency", "timeout", "http_error", "duplicate_invocation", "cancellation", "navigation"]
+    type: Literal["latency", "timeout", "http_error", "duplicate_invocation", "cancellation", "unregister_during_invoke", "navigation"]
     tool: str | None = None
     duration_ms: int = 0
     url: str | None = None
