@@ -15,13 +15,11 @@
   const argumentMode = (profile, host) => {
     if (profile === 'native-object') return 'object';
     if (profile === 'legacy-string') return 'string';
-    // Compatibility hosts and older/unknown browsers use the legacy string
-    // contract. Chrome deprecated string arguments from version 155, so use
-    // objects only from that documented transition onwards. Callers can pin a
-    // profile when testing another browser contract.
-    if (host?.__webmcpResilienceCompatibilityHost) return 'string';
+    // Chrome versions before 155 require JSON strings. Use structured
+    // arguments by default once the detected browser supports them; callers
+    // can pin legacy-string only when targeting an older browser contract.
     const match = navigator.userAgent.match(/(?:Chrome|Chromium)\/(\d+)/);
-    return match && Number(match[1]) >= 155 ? 'object' : 'string';
+    return match && Number(match[1]) < 155 ? 'string' : 'object';
   };
   window.__webmcp_resilience = {
     lifecycle: [],
