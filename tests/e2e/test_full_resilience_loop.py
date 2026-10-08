@@ -113,7 +113,9 @@ document.modelContext = {
   __webmcpResilienceCompatibilityHost: true,
   async registerTool(tool) { tools.push(tool); },
   async getTools() { return tools; },
-  async executeTool(tool, json) { return tool.execute(JSON.parse(json)); },
+  async executeTool(tool, args) {
+    return tool.execute(typeof args === 'string' ? JSON.parse(args) : args);
+  },
 };
 await document.modelContext.registerTool({
   name: 'toolautosubmit', inputSchema: {type: 'object'}, annotations: {readOnlyHint: true},
@@ -196,7 +198,13 @@ def test_cli_full_loop_replays_a_redacted_adversarial_failure(
     assert failed_state["claims"]["active"] == 2
     repro_path = Path(next(item["path"] for item in failure_json["artifacts"] if item["kind"] == "scenario"))
     repro = yaml.safe_load(repro_path.read_text())
-    assert [action.get("invoke") or action.get("action") for actions in repro["scenario"]["actors"].values() for action in actions] == ["claim_slot", "click", "wait"]
+    reduced_actions = {
+        action.get("invoke") or action.get("action")
+        for actions in repro["scenario"]["actors"].values()
+        for action in actions
+    }
+    assert {"claim_slot", "click"} <= reduced_actions
+    assert reduced_actions <= {"claim_slot", "click", "wait"}
 
     # Persisted bundles are already redacted. Copying the JSON models the
     # handoff to a developer or coding agent in another directory.

@@ -190,6 +190,12 @@ target-provided `__webmcpResilienceUnregisterTool` hook that aborts the
 registration signal. Without Chrome 153+ or that hook, the fault records a
 clear skip rather than failing.
 
+Chrome Status, checked 2026-10-08, lists the WebMCP origin trial as Chrome
+149–156 and a planned shipping milestone of Chrome 157. That is a planning
+status, not proof that the feature has shipped. See
+[spec tracking](docs/spec-tracking.md) for the dated sources and confirmed
+milestones.
+
 ### Common setup problems
 
 - **A native tool rejects its arguments:** older Chrome WebMCP builds use JSON

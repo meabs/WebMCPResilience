@@ -1,0 +1,12 @@
+{
+  "entry_point": "document.modelContext",
+  "tool_count": 6,
+  "tool_names": [
+    "claim_slot",
+    "clear_records",
+    "complete_next_record",
+    "create_record",
+    "get_observable_state",
+    "set_completion_guardrail"
+  ]
+}

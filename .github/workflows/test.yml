@@ -3,6 +3,9 @@ name: test
 on:
   push:
   pull_request:
+  schedule:
+    - cron: "17 8 * * 1"
+  workflow_dispatch:
 
 jobs:
   clean-install:
@@ -27,7 +30,20 @@ jobs:
       - run: .venv/bin/python -m pip install -e '.[dev]'
       - run: .venv/bin/pytest -q -m 'not e2e'
   e2e:
+    name: e2e (${{ matrix.browser.name }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser:
+          - name: playwright-chromium-153
+            install: chromium
+            channel: ""
+          - name: chrome-beta
+            install: chrome-beta
+            channel: chrome-beta
+    env:
+      WEBMCP_TEST_BROWSER_CHANNEL: ${{ matrix.browser.channel }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -35,7 +51,19 @@ jobs:
           python-version: '3.12'
       - run: python -m venv .venv
       - run: .venv/bin/python -m pip install -e '.[dev]'
-      - run: .venv/bin/playwright install --with-deps chromium
+      - run: .venv/bin/playwright install --with-deps ${{ matrix.browser.install }}
+      - name: Record browser version
+        run: |
+          .venv/bin/python - <<'PY'
+          import os
+          from playwright.sync_api import sync_playwright
+
+          channel = os.environ.get("WEBMCP_TEST_BROWSER_CHANNEL") or None
+          with sync_playwright() as playwright:
+              browser = playwright.chromium.launch(channel=channel)
+              print(f"channel={channel or 'playwright-chromium'} version={browser.version}")
+              browser.close()
+          PY
       - run: .venv/bin/pytest -q -m e2e
   compatibility-contract:
     # This is an injected compatibility-host contract test, not native WebMCP
@@ -51,3 +79,35 @@ jobs:
       - run: .venv/bin/python -m pip install -e '.[dev]'
       - run: .venv/bin/playwright install --with-deps chromium
       - run: .venv/bin/pytest -q tests/integration/test_lab_site.py -k 'object_arguments'
+  demo-preflight-contract:
+    name: demo preflight contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m venv .venv
+      - run: .venv/bin/python -m pip install -e '.[dev]'
+      - run: .venv/bin/playwright install --with-deps chromium
+      - name: Start demo fixture
+        run: |
+          .venv/bin/webmcp demo >/tmp/webmcp-demo.log 2>&1 &
+          echo $! >/tmp/webmcp-demo.pid
+          for attempt in {1..20}; do
+            curl --fail --silent http://127.0.0.1:4173/ >/dev/null && exit 0
+            sleep 0.1
+          done
+          cat /tmp/webmcp-demo.log
+          exit 1
+      - name: Compare preflight snapshot
+        run: |
+          (
+            cd examples/lab
+            ../../.venv/bin/webmcp preflight --ci --json >/tmp/demo-preflight.json
+          )
+          .venv/bin/python scripts/check_demo_preflight.py \
+            /tmp/demo-preflight.json docs/preflight-demo-snapshot.json
+      - name: Stop demo fixture
+        if: always()
+        run: test ! -f /tmp/webmcp-demo.pid || kill "$(cat /tmp/webmcp-demo.pid)" || true

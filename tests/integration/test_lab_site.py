@@ -99,6 +99,10 @@ async def test_auto_profile_passes_string_arguments_to_a_native_shaped_host(lab_
         assert client.page
         await client.page.goto(lab_server)
         await client.page.evaluate("""() => {
+          Object.defineProperty(navigator, 'userAgent', {
+            configurable: true,
+            value: 'Mozilla/5.0 Chrome/151.0.0.0 Safari/537.36',
+          });
           const tool = {name: 'string_tool', inputSchema: {type: 'object'}};
           document.modelContext = {
             async getTools() { return [tool]; },
@@ -139,10 +143,48 @@ async def test_auto_profile_gate_is_pinned_to_chrome_151_and_155_fixtures(
         assert result["code"] == expected_code
 
 
-async def test_auto_profile_preserves_string_arguments_for_compatibility_host(lab_server: str) -> None:
+async def test_auto_profile_uses_structured_arguments_on_detected_chrome_155_or_later(
+    lab_server: str,
+) -> None:
+    async with BrowserClient() as client:
+        assert client.page and client.browser
+        major = int(client.browser.version.split(".", maxsplit=1)[0])
+        if major < 155:
+            pytest.skip(
+                "structured WebMCP arguments require Chrome 155+; "
+                f"Playwright browser is {major}"
+            )
+        await client.page.goto(lab_server)
+        await client.page.evaluate("""() => {
+          const tool = {name: 'structured_tool', inputSchema: {type: 'object'}};
+          document.modelContext = {
+            async getTools() { return [tool]; },
+            async executeTool(_tool, args) {
+              return {code: typeof args === 'object' && args.value === 'ok' ? 'OBJECT' : 'WRONG'};
+            },
+          };
+        }""")
+        adapter = WebMCPAdapter(client.page)
+        await adapter.install()
+        tools = await adapter.get_tools()
+        result = await adapter.invoke_tool(
+            "structured_tool", {"value": "ok"}, "structured-arguments"
+        )
+
+    assert tools[0]["argumentMode"] == "object"
+    assert result["code"] == "OBJECT"
+
+
+async def test_auto_profile_preserves_string_arguments_for_older_compatibility_host(lab_server: str) -> None:
     async with BrowserClient() as client:
         assert client.page
         await client.page.goto(lab_server)
+        await client.page.evaluate("""() => {
+          Object.defineProperty(navigator, 'userAgent', {
+            configurable: true,
+            value: 'Mozilla/5.0 Chrome/151.0.0.0 Safari/537.36',
+          });
+        }""")
         adapter = WebMCPAdapter(client.page)
         await adapter.install()
         tools = await adapter.get_tools()
