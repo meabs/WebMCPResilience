@@ -1,5 +1,6 @@
 """CLI frontend for the typed CommandAPI; no execution logic lives here."""
 import asyncio
+import errno
 import json
 import threading
 from pathlib import Path
@@ -8,7 +9,7 @@ from urllib.parse import urlsplit
 import typer
 from rich.console import Console
 
-from .commands import CommandAPI, failure_handoff
+from .commands import CommandAPI, ReplaySourceOverwriteError, failure_handoff
 from .config import Config, load_config
 from .demo import create_server, forge_scenario, serve
 from .models.bundle import ENGINE_VERSION, RunBundle
@@ -22,6 +23,10 @@ from .tool_contracts import concise_drift_lines
 
 app = typer.Typer(help="Portable resilience evidence for WebMCP applications.", pretty_exceptions_enable=False)
 console = Console()
+
+
+class DemoPortInUseError(RuntimeError):
+    code = "demo_port_in_use"
 
 
 def _api(output_dir: Path) -> CommandAPI:
@@ -142,6 +147,10 @@ app.command("inspect")(preflight)
 def replay(bundle: Path, ci: bool = typer.Option(True, "--ci/--headed"), allow_mutations: bool = typer.Option(False, "--allow-mutations"), strict_tool_contracts: bool = typer.Option(False, "--strict-tool-contracts"), run_id: str | None = typer.Option(None, "--run-id"), output: Path | None = typer.Option(None, "--output"), json_output: bool = typer.Option(False, "--json")) -> None:
     """Replay only a compatible versioned bundle; unsafe artifacts are rejected."""
     try:
+        if output is not None and output.resolve() == bundle.resolve():
+            raise ReplaySourceOverwriteError(
+                "unsafe replay rejected: --output would overwrite the source bundle"
+            )
         api = _api(Path(".webmcp/runs")); result = asyncio.run(api.replay(bundle, run_id=run_id, headless=ci, allow_mutations=allow_mutations, strict_tool_contracts=strict_tool_contracts)); _emit(result, json_output=json_output, output=output, api=api)
         if not result.result["passed"]: raise typer.Exit(1)
     except typer.Exit: raise
@@ -241,6 +250,15 @@ def demo_race(host: str = "127.0.0.1", port: int = 4173,
                     f"Reduced repro: {failed_handoff.get('reduced_repro_path') or 'none'}\n"
                     f"Replay: {' '.join(failed_handoff.get('replay_command') or [])}"
                 )
+    except OSError as error:
+        if error.errno == errno.EADDRINUSE:
+            _command_error(
+                DemoPortInUseError(
+                    f"demo server port {port} is already in use; choose another port with --port"
+                ),
+                json_output,
+            )
+        _command_error(error, json_output)
     except Exception as error:
         _command_error(error, json_output)
     finally:

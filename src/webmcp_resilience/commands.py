@@ -434,6 +434,12 @@ class CommandError(RuntimeError):
     code = "invalid_request"
 
 
+class ReplaySourceOverwriteError(CommandError):
+    """A replay must not replace the evidence bundle that it reads."""
+
+    code = "unsafe_replay_output"
+
+
 class ToolContractDriftError(CommandError):
     """A replay was rejected because its saved inventory contract changed."""
 
@@ -1396,7 +1402,13 @@ class CommandAPI:
                          "tool_contract_drift": bundle.tool_contract_drift,
                          "tool_contract_replay_decision": bundle.tool_contract_replay_decision,
                          "tool_contract_expectations": bundle.tool_contract_expectations}
-        bundle.replay_command = ["webmcp", "replay", str(output_root / "bundle.json"), "--run-id", bundle.run_id]
+        bundle.replay_command = [
+            "webmcp",
+            "replay",
+            str(output_root / "bundle.json"),
+            "--run-id",
+            f"{bundle.run_id}-replay",
+        ]
         if allow_mutations:
             bundle.replay_command.append("--allow-mutations")
         if strict_tool_contracts:
@@ -1419,6 +1431,7 @@ class CommandAPI:
             "2.0": "webmcp-resilience/2",
             "3.0": "webmcp-resilience/3",
             "4.0": "webmcp-resilience/4",
+            "5.0": "webmcp-resilience/5",
         }
         if (
             supported_bundle_versions.get(saved.schema_version) != saved.compatibility.runner
@@ -1494,6 +1507,12 @@ class CommandAPI:
                      strict_tool_contracts: bool = False,
                      allowed_target_origins: Iterable[str] | None = None) -> RunBundle:
         """Replay a contract bundle without any frontend-specific filesystem shim."""
+        source = path.resolve()
+        if run_id is not None and self.bundle_path(run_id) == source:
+            raise ReplaySourceOverwriteError(
+                "unsafe replay rejected: --run-id would overwrite the source bundle; "
+                "choose a distinct replay run id"
+            )
         scenario, seed, saved = self.replay_bundle(path)
         boundary = saved.browser_environment.get("state_boundary", {})
         if isinstance(boundary, dict):

@@ -14,7 +14,7 @@ def test_validate_emits_portable_versioned_bundle(tmp_path: Path) -> None:
     scenario = tmp_path / "scenario.yaml"
     scenario.write_text("name: portable\nactors:\n  agent:\n    - invoke: read_status\n")
     bundle = CommandAPI(Config()).validate(scenario, run_id="run-123")
-    assert bundle.schema_version == "4.0"
+    assert bundle.schema_version == "5.0"
     assert bundle.run_id == "run-123"
     assert bundle.actions[0]["invoke"] == "read_status"
     assert bundle.approvals == []
@@ -92,6 +92,18 @@ def replay_contract(*, groups: dict[str, str] | None = None) -> RunBundle:
                      tool_inventory=inventory, inventory_contract=contract, result={"passed": False},
                      faults=[], approvals=[],
                      execution={"adversarial": True, "seed": 9, "schedule": [{"offset_ms": 0, "actor": "b", "action_index": 0}, {"offset_ms": 0, "actor": "a", "action_index": 0}], "schedule_index": 1, "requirements": requirements.model_dump(), "fault_configuration": [], "approval_policy": []})
+
+
+def test_replay_rejects_a_run_id_that_would_overwrite_source_evidence(
+    tmp_path: Path,
+) -> None:
+    api = CommandAPI(Config(), output_dir=tmp_path / "runs")
+    source = replay_contract()
+    source.run_id = "source-failure"
+    source_path = source.write(api.bundle_path(source.run_id))
+
+    with pytest.raises(CommandError, match="would overwrite the source bundle"):
+        __import__("asyncio").run(api.replay(source_path, run_id=source.run_id))
 
 
 def test_command_api_replay_preserves_recorded_adversarial_schedule(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

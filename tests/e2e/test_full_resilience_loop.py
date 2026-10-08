@@ -13,6 +13,7 @@ import yaml
 from typer.testing import CliRunner
 
 from webmcp_resilience.agent_control import AgentPolicy, LocalMCPControlAdapter
+from webmcp_resilience.browser import BrowserClient
 from webmcp_resilience.cli import app
 from webmcp_resilience.commands import CommandAPI, ToolContractDriftError
 from webmcp_resilience.config import Config
@@ -58,6 +59,16 @@ def decode(output: str) -> dict:
         except json.JSONDecodeError:
             continue
     raise AssertionError(f"no JSON response in output: {output!r}")
+
+
+async def require_chrome_153_for_unregister_fault() -> None:
+    async with BrowserClient() as client:
+        major = int(client.browser.version.split(".", maxsplit=1)[0])
+    if major < 153:
+        pytest.skip(
+            "unregister_during_invoke requires Chrome 153+; "
+            f"Playwright Chromium is {major}"
+        )
 
 
 def contract_page(*, quantity_required: bool, chrome_major: int | None = None) -> str:
@@ -159,6 +170,10 @@ def test_cli_full_loop_replays_a_redacted_adversarial_failure(
     assert failed_payload["result"]["error_code"] == "invariant_violation"
     assert failed_payload["result"]["failure_handoff"]["failed_invariant"] == "claims.active <= claims.capacity"
     assert failed_payload["result"]["failure_handoff"]["bundle_path"].endswith("race-failure/bundle.json")
+    assert "--run-id" in failed_payload["result"]["failure_handoff"]["replay_command"]
+    assert failed_payload["result"]["failure_handoff"]["replay_command"][
+        failed_payload["result"]["failure_handoff"]["replay_command"].index("--run-id") + 1
+    ] == "race-failure-replay"
     failure_bundle = webmcp / "runs" / "race-failure" / "bundle.json"
     failure_json = json.loads(failure_bundle.read_text())
     assert failure_json["state_observation"]["mode"] == "state_script"
@@ -206,9 +221,9 @@ def test_cli_full_loop_replays_a_redacted_adversarial_failure(
     assert replay_json["result"]["error_code"] == failure_json["result"]["error_code"] == "invariant_violation"
     assert replay_json["compatibility"]["tool_inventory_fingerprint"] == failure_json["compatibility"]["tool_inventory_fingerprint"]
 
-    # Version 4 adds unregister-during-invoke semantics. Version 2 and 3
-    # bundles remain replayable when their scenarios do not use that fault.
-    for version in ("2.0", "3.0"):
+    # Version 5 records safer replay commands. Version 2 through 4 bundles
+    # remain replayable when their scenarios do not use newer fault semantics.
+    for version in ("2.0", "3.0", "4.0"):
         legacy_bundle = tmp_path / f"version-{version}-bundle.json"
         legacy_payload = json.loads(json.dumps(failure_json))
         legacy_payload["schema_version"] = version
@@ -366,6 +381,7 @@ def test_replay_uses_structured_arguments_on_chrome_155_or_later(tmp_path: Path)
 def test_unregister_during_invoke_fixture_fails_vulnerable_and_passes_safe(
     tmp_path: Path,
 ) -> None:
+    asyncio.run(require_chrome_153_for_unregister_fault())
     fixture_directory = (
         Path(__file__).parents[2] / "examples" / "unregister-during-invoke"
     )

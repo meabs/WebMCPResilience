@@ -4,5 +4,6 @@ __pycache__/
 *.pyc
 .webmcp/failures/
 .webmcp/runs/
+examples/*/.webmcp/runs/
 .webmcp/external/
 .webmcp/*.trace.json
