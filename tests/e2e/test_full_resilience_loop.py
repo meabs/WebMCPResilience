@@ -113,7 +113,9 @@ document.modelContext = {
   __webmcpResilienceCompatibilityHost: true,
   async registerTool(tool) { tools.push(tool); },
   async getTools() { return tools; },
-  async executeTool(tool, json) { return tool.execute(JSON.parse(json)); },
+  async executeTool(tool, args) {
+    return tool.execute(typeof args === 'string' ? JSON.parse(args) : args);
+  },
 };
 await document.modelContext.registerTool({
   name: 'toolautosubmit', inputSchema: {type: 'object'}, annotations: {readOnlyHint: true},

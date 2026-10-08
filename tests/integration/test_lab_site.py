@@ -99,6 +99,10 @@ async def test_auto_profile_passes_string_arguments_to_a_native_shaped_host(lab_
         assert client.page
         await client.page.goto(lab_server)
         await client.page.evaluate("""() => {
+          Object.defineProperty(navigator, 'userAgent', {
+            configurable: true,
+            value: 'Mozilla/5.0 Chrome/151.0.0.0 Safari/537.36',
+          });
           const tool = {name: 'string_tool', inputSchema: {type: 'object'}};
           document.modelContext = {
             async getTools() { return [tool]; },
@@ -171,10 +175,16 @@ async def test_auto_profile_uses_structured_arguments_on_detected_chrome_155_or_
     assert result["code"] == "OBJECT"
 
 
-async def test_auto_profile_preserves_string_arguments_for_compatibility_host(lab_server: str) -> None:
+async def test_auto_profile_preserves_string_arguments_for_older_compatibility_host(lab_server: str) -> None:
     async with BrowserClient() as client:
         assert client.page
         await client.page.goto(lab_server)
+        await client.page.evaluate("""() => {
+          Object.defineProperty(navigator, 'userAgent', {
+            configurable: true,
+            value: 'Mozilla/5.0 Chrome/151.0.0.0 Safari/537.36',
+          });
+        }""")
         adapter = WebMCPAdapter(client.page)
         await adapter.install()
         tools = await adapter.get_tools()
