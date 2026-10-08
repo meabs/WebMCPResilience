@@ -38,7 +38,9 @@ seeded adversarial schedule, reduces the failure, and replays the saved bundle
 through `CommandAPI`. The JSON form is one stable document; the human form
 prints the compact failure handoff.
 
-The run exits non-zero because the invariant is supposed to fail. Inspect the
+`webmcp demo-race` exits 0 after it finds and replays the expected failure.
+The underlying `webmcp run` command exits non-zero because the invariant is
+supposed to fail. Inspect the
 redacted textual evidence with `webmcp console` or the local MCP control demo.
 The saved bundle contains the exact adversarial schedule; replay does not
 re-roll it. The reducer also writes `repro.yaml` after confirming that the

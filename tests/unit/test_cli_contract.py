@@ -17,6 +17,20 @@ def test_demo_race_is_a_registered_cli_contract() -> None:
     assert "Resilience Forge" in result.output
 
 
+def test_demo_race_reports_a_busy_port_with_a_typed_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    error = OSError(98, "Address already in use")
+    monkeypatch.setattr("webmcp_resilience.cli.create_server", lambda *_args: (_ for _ in ()).throw(error))
+
+    result = CliRunner().invoke(app, ["demo-race", "--port", "4173", "--json"])
+
+    assert result.exit_code == 2
+    payload = json.loads(result.output)
+    assert payload["error_code"] == "demo_port_in_use"
+    assert "choose another port with --port" in payload["error"]
+
+
 def test_init_from_url_writes_an_external_target_and_state_scaffold(tmp_path: Path) -> None:
     result = CliRunner().invoke(
         app, ["init", "--directory", str(tmp_path / ".webmcp"), "--from-url", "https://shop.example/checkout", "--json"]

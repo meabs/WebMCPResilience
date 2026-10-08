@@ -60,9 +60,17 @@ preview to open the full video.*
 ```bash
 git clone https://github.com/meabs/WebMCPResilience.git
 cd WebMCPResilience
+uv sync --locked --extra dev
+uv run playwright install --with-deps chromium
+uv run webmcp demo-race
+```
+
+The supported pip alternative is:
+
+```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install -e '.[dev]'
-.venv/bin/playwright install chromium
+.venv/bin/playwright install --with-deps chromium
 .venv/bin/webmcp demo-race
 ```
 
@@ -78,7 +86,7 @@ your app's explicit state boundary:
 Failed invariant: claims.active <= claims.capacity
 Observed state: {"claims": {"active": 2, "capacity": 1}}
 Bundle: .webmcp/runs/demo-race-failure/bundle.json
-Replay: webmcp replay .webmcp/runs/demo-race-failure/bundle.json --run-id demo-race-failure --allow-mutations
+Replay: webmcp replay .webmcp/runs/demo-race-failure/bundle.json --run-id demo-race-failure-replay --allow-mutations
 ```
 
 See the [fixture source and scenario](examples/resilience-forge) for the full
@@ -91,7 +99,15 @@ terminal before replaying its saved bundle:
 ```bash
 .venv/bin/webmcp demo
 # In another terminal:
-.venv/bin/webmcp replay .webmcp/runs/demo-race-failure/bundle.json --allow-mutations --json
+.venv/bin/webmcp replay .webmcp/runs/demo-race-failure/bundle.json \
+  --run-id demo-race-failure-replay --allow-mutations --json
+```
+
+If port 4173 is already occupied, run either command with a different port:
+
+```bash
+.venv/bin/webmcp demo --port 4174
+.venv/bin/webmcp demo-race --port 4174
 ```
 
 ## Why it exists
@@ -155,13 +171,24 @@ not guess from page text, network traffic, or hidden browser state.
 
 The included lab works everywhere supported by Playwright because it uses a
 compatibility host. That is useful for local tests, but it does not prove that
-a browser has native WebMCP support.
+a browser has native WebMCP support. Preflight reports `native: true` when the
+selected host does not identify itself as this project's compatibility host;
+an arbitrary in-page polyfill can therefore appear native. Treat that field as
+host-reported evidence, not browser conformance proof.
 
 To test a native browser, run `preflight` with the exact browser, channel, and
 flags you plan to use. Then run and replay a scenario without the lab fixture.
 Each saved bundle records the browser version, launch settings, argument
 profile, and available capabilities. This project does not claim protocol
 conformance.
+
+The current automated baseline uses Playwright 1.63 with Chromium 153. The
+Chrome 155 structured-argument path is covered with a version-pinned fixture;
+it is simulated on Chromium 153, not validated against a native Chrome 155
+binary. `unregister_during_invoke` is exercised on Chromium 153 and requires a
+target-provided `__webmcpResilienceUnregisterTool` hook that aborts the
+registration signal. Without Chrome 153+ or that hook, the fault records a
+clear skip rather than failing.
 
 ### Common setup problems
 
@@ -200,6 +227,10 @@ conformance.
 compatibility, redacted tool-contract inventory, schedule, trace, observable
 state, approvals, artifact metadata, outcome, replay decision, and replay command. `diff`
 compares two existing bundles without launching a browser.
+
+New bundles use version 5.0; replay continues to accept version 2.0, 3.0, and
+4.0 bundles. The CLI JSON envelope's `contract_version: "1.0"` is a separate
+CLI-response contract, not the evidence bundle version.
 
 ## Scenario in one screen
 
