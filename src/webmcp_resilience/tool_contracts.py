@@ -219,7 +219,15 @@ def canonical_tool(tool: Mapping[str, Any], *, include_descriptions: bool = Fals
 
 def redact_tool_inventory(inventory: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """Persist safe descriptors while retaining schema property structure."""
-    fields = ("name", "description", "inputSchema", "outputSchema", "annotations", "semanticVersion")
+    fields = (
+        "name",
+        "description",
+        "inputSchema",
+        "outputSchema",
+        "annotations",
+        "semanticVersion",
+        "identity",
+    )
     result = []
     for tool in inventory:
         projected = {key: deepcopy(tool.get(key)) for key in fields}

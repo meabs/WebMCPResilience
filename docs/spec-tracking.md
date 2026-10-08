@@ -23,6 +23,22 @@ Those are Chrome Status milestones, not a statement that the feature has
 already shipped. The imperative API documentation was last updated 2026-09-21
 and continues to describe WebMCP as under active discussion.
 
+## Cross-origin discovery
+
+Checked 2026-10-08 against the [Imperative API cross-origin
+documentation](https://developer.chrome.com/docs/ai/webmcp/imperative-api#cross-origin-iframes).
+The documentation states that `getTools()` returns same-origin tools by
+default. Cross-origin discovery requires the caller to list a secure origin in
+`fromOrigins`, and the registering origin must explicitly expose the tool to
+the caller. It also states that cross-origin iframe registration is disabled
+by default and requires `tools` Permissions Policy delegation.
+
+The local two-origin fixture in Step 6 is a compatibility-host simulation of
+those documented discovery rules. It does not establish that the local
+Playwright Chromium baseline implements native WebMCP cross-origin behavior;
+the current public docs do not provide a separate milestone for this exact
+combination of iframe, policy, and exposure checks.
+
 ## Automated tracking
 
 The weekly `demo preflight contract` GitHub Actions job compares the committed
@@ -39,4 +55,5 @@ snapshot changes are reviewed before the weekly schedule.
 | Step 2 preflight entry-point evidence | No new evidence field was added: the source already emitted `preflight.webmcp.api.location`; Step 2 audited and tested that existing evidence. |
 | Chrome 155 structured-argument behavior on the local baseline | Simulated with a version-pinned fixture because the local Playwright Chromium baseline is 153. The CI Chrome-beta matrix runs the same capability gate on a newer channel when available; it skips with a reason below 155. |
 | Chrome 153 unregister behavior below the capability threshold | Intentionally skipped with recorded `fault.skipped` evidence; it must never fail a run solely because the browser is older. |
+| Native cross-origin WebMCP validation on the local baseline | Simulated through the compatibility-host fixture because Chromium 153 does not provide native WebMCP evidence. The fixture is explicitly documented as non-conformance coverage. |
 | Future post-157 status | Not asserted until Chrome Status or another public Chrome source provides a verified update. |

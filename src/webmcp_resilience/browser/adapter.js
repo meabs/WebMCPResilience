@@ -7,6 +7,14 @@
     return navigator.modelContext;
   };
   const context = () => primaryContext() ?? legacyNavigatorContext();
+  const registrationIdentity = (tool) => {
+    const origin = typeof tool.origin === 'string' ? tool.origin : location.origin;
+    if (!tool.window || tool.window === window) return { origin, frame: 'top' };
+    const frameIndex = Array.from(document.querySelectorAll('iframe')).findIndex(
+      (frame) => frame.contentWindow === tool.window,
+    );
+    return { origin, frame: frameIndex >= 0 ? `iframe:${frameIndex}` : 'external-frame' };
+  };
   const requireContext = () => {
     const value = context();
     if (!value) throw new Error("WebMCP is unavailable: document.modelContext was not exposed by this browser/page.");
@@ -34,7 +42,8 @@
       // call using a second argument encoding.
       const selectedArgumentMode = argumentMode(profile, host);
       return Array.from(tools, (tool, index) => {
-        const handleId = `${location.origin}::${window === window.top ? 'top' : location.href}::${tool.name}::${index}`;
+        const identity = registrationIdentity(tool);
+        const handleId = `${identity.origin}::${identity.frame}::${tool.name}::${index}`;
         this.toolHandles.set(handleId, tool);
         return {
         name: tool.name,
@@ -46,7 +55,7 @@
         // evidence only and is not part of the default compatibility hash.
         semanticVersion: tool.semanticVersion,
         handleId,
-        identity: { handleId, name: tool.name, origin: location.origin, frame: window === window.top ? 'top' : location.href },
+        identity: { handleId, name: tool.name, ...identity },
         argumentMode: selectedArgumentMode,
       };
       });

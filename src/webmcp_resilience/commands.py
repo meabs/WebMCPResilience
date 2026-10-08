@@ -92,6 +92,7 @@ def _inventory_entry(tool: dict[str, Any], index: int) -> dict[str, Any]:
         and all(isinstance(item, str) for item in schema.get("required", []))
     )
     annotations = tool.get("annotations")
+    identity = tool.get("identity") if isinstance(tool.get("identity"), dict) else {}
     annotation_quality = "valid_object" if isinstance(annotations, dict) else "missing"
     return {
         "index": index,
@@ -105,6 +106,10 @@ def _inventory_entry(tool: dict[str, Any], index: int) -> dict[str, Any]:
         },
         "annotation_quality": annotation_quality,
         "annotations": annotations if isinstance(annotations, dict) else {},
+        "registration": {
+            "origin": identity.get("origin"),
+            "frame": identity.get("frame"),
+        },
         "mutation_signal": (
             "read_only" if isinstance(annotations, dict) and annotations.get("readOnlyHint") is True
             else "consequential" if isinstance(annotations, dict) and annotations.get("destructiveHint") is True
@@ -1432,6 +1437,7 @@ class CommandAPI:
             "3.0": "webmcp-resilience/3",
             "4.0": "webmcp-resilience/4",
             "5.0": "webmcp-resilience/5",
+            "6.0": "webmcp-resilience/6",
         }
         if (
             supported_bundle_versions.get(saved.schema_version) != saved.compatibility.runner

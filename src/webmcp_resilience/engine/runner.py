@@ -55,6 +55,7 @@ def _is_navigation_destroyed(error: Exception) -> bool:
 class ScenarioRunner:
     def __init__(self, page: Page, scenario: Scenario, state_script: str | None = None, from_origins: list[str] | None = None, allow_mutations: bool = False, *, base_url: str | None = None, webmcp_profile: str = "auto", invoke_timeout_ms: int | None = 15_000, state_settle_ms: int = 0) -> None:
         self.page, self.scenario = page, scenario
+        self.from_origins = set(from_origins or [])
         self.adapter = WebMCPAdapter(page, state_script, from_origins, webmcp_profile)
         self.faults = build_effects(scenario.faults)
         required_groups = {"scenario": "1", "fault_model": "1", "invariant_model": "1", "trace_model": "1", "browser_webmcp_adapter": "1"}
@@ -77,6 +78,7 @@ class ScenarioRunner:
         self.result_counts: dict[str, dict[str, int]] = {}
         self.result_code_observations: dict[str, list[str | None]] = {}
         self.tools: dict[str, dict[str, Any]] = {}
+        self._tool_candidates: dict[str, list[dict[str, Any]]] = {}
         self._tool_candidates: dict[str, list[dict[str, Any]]] = {}
         self._adapter_stale = False
         page.on("framenavigated", self._on_navigation)
@@ -182,6 +184,7 @@ class ScenarioRunner:
         for outcome in invocation_outcomes:
             if isinstance(outcome, Exception):
                 raise outcome
+        self._check_cross_origin_invariants()
         await self._check_invariants("system")
         await self._check_invariants("system", final=True)
         for expression in self.scenario.result_invariants:
@@ -190,6 +193,49 @@ class ScenarioRunner:
         self._check_tool_contract_assertions()
         self.recorder.add("system", "scenario.end")
         return self.recorder.run
+
+    def _check_cross_origin_invariants(self) -> None:
+        """Check explicit discovery boundaries without inferring browser policy."""
+        for invariant in self.scenario.cross_origin_invariants:
+            matching = [
+                tool
+                for candidates in self._tool_candidates.values()
+                for tool in candidates
+                if tool.get("name") == invariant.tool
+                and (tool.get("identity") or {}).get("origin") == invariant.origin
+            ]
+            configured = invariant.origin in self.from_origins
+            if invariant.type == "listed_with_from_origin":
+                passed = configured and bool(matching)
+                expected = "listed when its origin is configured in fromOrigins"
+            elif invariant.type == "not_listed_without_from_origin":
+                passed = configured or not matching
+                expected = "not listed when its origin is absent from fromOrigins"
+            else:
+                passed = not matching
+                expected = "registration refused by default"
+            evidence = {
+                "type": invariant.type,
+                "tool": invariant.tool,
+                "origin": invariant.origin,
+                "from_origins": sorted(self.from_origins),
+                "discovered": bool(matching),
+            }
+            if not passed:
+                message = f"{invariant.tool!r} at {invariant.origin} must be {expected}"
+                self.recorder.add(
+                    "system",
+                    "cross_origin_invariant.fail",
+                    name=invariant.tool,
+                    data=evidence | {"error": message},
+                )
+                raise InvariantError(message)
+            self.recorder.add(
+                "system",
+                "cross_origin_invariant.pass",
+                name=invariant.tool,
+                data=evidence,
+            )
 
     def _check_tool_contract_assertions(self) -> None:
         """Evaluate only scenario-declared, observable result contracts."""
