@@ -227,6 +227,7 @@ def redact_tool_inventory(inventory: Iterable[Mapping[str, Any]]) -> list[dict[s
         "annotations",
         "semanticVersion",
         "identity",
+        "declarative",
     )
     result = []
     for tool in inventory:

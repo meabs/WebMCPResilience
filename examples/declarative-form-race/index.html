@@ -1,0 +1,60 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Declarative form race fixture</title>
+<form id="submit-note" action="/submitted" toolname="submit_note"
+  tooldescription="Submit a note to the shared fixture record." toolautosubmit>
+  <label>Note <input name="note" value="human note"></label>
+  <button id="submit" type="submit">Submit note</button>
+</form>
+<p id="status">ready</p>
+<script type="module">
+  const form = document.querySelector("#submit-note");
+  const safe = new URLSearchParams(location.search).get("mode") === "safe";
+  const state = { pending: 0, submissions: 0 };
+
+  async function submitNote() {
+    if (safe && (state.pending > 0 || state.submissions > 0)) {
+      return { code: "DUPLICATE_GUARDED" };
+    }
+    // Count accepted submissions before the async work completes. This makes
+    // duplicate acceptance observable even when the browser serializes the
+    // human click after the agent's form dispatch.
+    state.submissions += 1;
+    state.pending += 1;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    state.pending -= 1;
+    document.querySelector("#status").textContent = `submissions: ${state.submissions}`;
+    return { code: "OK" };
+  }
+
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    form.__submission = submitNote();
+  });
+
+  // The baseline Chromium has no native declarative WebMCP support. This host
+  // exposes the documented form attributes as fixture-only discovery evidence.
+  document.modelContext = {
+    __webmcpResilienceCompatibilityHost: true,
+    async getTools() {
+      return [{
+        name: form.getAttribute("toolname"),
+        description: form.getAttribute("tooldescription"),
+        inputSchema: {
+          type: "object",
+          properties: { note: { type: "string" } },
+        },
+        declarative: true,
+      }];
+    },
+    async executeTool(_tool, args) {
+      const input = typeof args === "string" ? JSON.parse(args) : args;
+      form.elements.note.value = input.note ?? "";
+      const event = new Event("submit", { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "agentInvoked", { value: true });
+      form.dispatchEvent(event);
+      return form.__submission;
+    },
+  };
+  window.__declarativeRace = { getState: () => ({ submissions: { ...state } }) };
+</script>

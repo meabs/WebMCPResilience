@@ -106,6 +106,9 @@ def _inventory_entry(tool: dict[str, Any], index: int) -> dict[str, Any]:
         },
         "annotation_quality": annotation_quality,
         "annotations": annotations if isinstance(annotations, dict) else {},
+        "discovery_mode": (
+            "declarative" if tool.get("declarative") is True else "imperative_or_unknown"
+        ),
         "consequential_hint": (
             annotations.get("consequentialHint") is True
             if isinstance(annotations, dict)
@@ -699,7 +702,7 @@ class CommandAPI:
             }
             probe["tools"] = {
                 "count": len(inventory),
-                "declarative": sum(isinstance(tool.get("inputSchema"), dict) for tool in inventory),
+                "declarative": sum(tool.get("declarative") is True for tool in inventory),
                 "schema_valid": sum(_inventory_entry(tool, index)["schema_quality"] == "valid_object" for index, tool in enumerate(inventory)),
                 "annotations_present": sum(isinstance(tool.get("annotations"), dict) for tool in inventory),
                 "inventory_error": inventory_error,
@@ -1445,6 +1448,7 @@ class CommandAPI:
             "5.0": "webmcp-resilience/5",
             "6.0": "webmcp-resilience/6",
             "7.0": "webmcp-resilience/7",
+            "8.0": "webmcp-resilience/8",
         }
         if (
             supported_bundle_versions.get(saved.schema_version) != saved.compatibility.runner
