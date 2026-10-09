@@ -1,0 +1,8 @@
+name: consequential-with-confirmation
+url: /
+actors:
+  agent:
+    - invoke: delete_record
+confirmations:
+  - tool: delete_record
+    description: User confirmed deletion in the application's own workflow.

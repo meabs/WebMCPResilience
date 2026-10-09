@@ -65,6 +65,18 @@ def test_cross_origin_invariant_type_is_validated() -> None:
         })
 
 
+def test_scenario_confirmation_declaration_is_typed() -> None:
+    scenario = Scenario.model_validate({
+        "name": "confirmation",
+        "actors": {"agent": [{"invoke": "delete_record"}]},
+        "confirmations": [{
+            "tool": "delete_record",
+            "description": "User confirmed deletion.",
+        }],
+    })
+    assert scenario.confirmations[0].tool == "delete_record"
+
+
 def test_unsupported_timed_fault_is_rejected() -> None:
     with pytest.raises(ValueError, match="unsupported"):
         Fault(type="timeout", at="after_invoke")

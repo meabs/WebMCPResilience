@@ -1,0 +1,7 @@
+name: consequential-without-confirmation
+url: /
+actors:
+  agent:
+    - invoke: delete_record
+metadata:
+  expected_failure: "The consequential tool completes without a scenario-declared application confirmation."

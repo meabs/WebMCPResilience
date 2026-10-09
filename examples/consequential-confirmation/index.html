@@ -1,0 +1,28 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Consequential confirmation fixture</title>
+<p id="status">ready</p>
+<script type="module">
+  const state = { deleted: false };
+  const tools = [];
+  document.modelContext = {
+    __webmcpResilienceCompatibilityHost: true,
+    async registerTool(tool) { tools.push(tool); },
+    async getTools() { return [...tools]; },
+    async executeTool(tool, args) {
+      return tool.execute(typeof args === "string" ? JSON.parse(args) : args);
+    },
+  };
+  await document.modelContext.registerTool({
+    name: "delete_record",
+    description: "Delete the fixture record.",
+    inputSchema: { type: "object", properties: {} },
+    annotations: { consequentialHint: true },
+    async execute() {
+      state.deleted = true;
+      document.querySelector("#status").textContent = "deleted";
+      return { code: "OK" };
+    },
+  });
+  window.__consequentialFixture = { getState: () => ({ record: { ...state } }) };
+</script>

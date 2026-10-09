@@ -107,6 +107,13 @@ class CrossOriginInvariant(BaseModel):
     origin: str
 
 
+class ConfirmationStep(BaseModel):
+    """A scenario-declared application confirmation before a consequential tool."""
+
+    tool: str
+    description: str | None = None
+
+
 class Scenario(BaseModel):
     name: str = Field(validation_alias=AliasChoices("name", "scenario"))
     url: str = "/"
@@ -118,6 +125,7 @@ class Scenario(BaseModel):
     result_invariants: list[str] = Field(default_factory=list)
     tool_contracts: dict[str, ToolContractExpectation] = Field(default_factory=dict)
     cross_origin_invariants: list[CrossOriginInvariant] = Field(default_factory=list)
+    confirmations: list[ConfirmationStep] = Field(default_factory=list)
     compatibility: dict[str, Any] = Field(default_factory=lambda: {"schema": "webmcp-resilience/scenario-1", "requires": {"scenario": "1", "fault_model": "1", "invariant_model": "1", "trace_model": "1", "browser_webmcp_adapter": "1"}})
     metadata: dict[str, Any] = Field(default_factory=dict)
     # Navigation-capable declarative tools may intentionally replace the page.

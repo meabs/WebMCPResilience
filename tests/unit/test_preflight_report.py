@@ -89,6 +89,20 @@ def test_toolautosubmit_contract_gets_a_navigation_note() -> None:
     assert finding["severity"] == "info"
 
 
+def test_preflight_exposes_consequential_hint_in_tool_inventory() -> None:
+    report = build_webmcp_compatibility_report(
+        probe(),
+        [{
+            "name": "delete_record",
+            "inputSchema": {"type": "object", "properties": {}},
+            "annotations": {"consequentialHint": True},
+        }],
+        browser={},
+    )
+
+    assert report["tool_inventory"][0]["consequential_hint"] is True
+
+
 def test_command_preflight_never_invokes_a_page_tool(tmp_path: Path, monkeypatch) -> None:
     calls: list[str] = []
 

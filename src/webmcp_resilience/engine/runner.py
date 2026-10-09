@@ -79,7 +79,6 @@ class ScenarioRunner:
         self.result_code_observations: dict[str, list[str | None]] = {}
         self.tools: dict[str, dict[str, Any]] = {}
         self._tool_candidates: dict[str, list[dict[str, Any]]] = {}
-        self._tool_candidates: dict[str, list[dict[str, Any]]] = {}
         self._adapter_stale = False
         page.on("framenavigated", self._on_navigation)
 
@@ -190,6 +189,7 @@ class ScenarioRunner:
         for expression in self.scenario.result_invariants:
             check(expression, {"results": self.result_counts})
             self.recorder.add("system", "result_invariant.pass", data={"expression": expression, "results": self.result_counts})
+        self._check_consequential_confirmations()
         self._check_tool_contract_assertions()
         self.recorder.add("system", "scenario.end")
         return self.recorder.run
@@ -234,6 +234,40 @@ class ScenarioRunner:
                 "system",
                 "cross_origin_invariant.pass",
                 name=invariant.tool,
+                data=evidence,
+            )
+
+    def _check_consequential_confirmations(self) -> None:
+        """Require scenario confirmation declarations for completed consequential tools."""
+        declared = {step.tool for step in self.scenario.confirmations}
+        for name, results in self.result_code_observations.items():
+            descriptors = self._tool_candidates.get(name, [])
+            if not any(
+                (descriptor.get("annotations") or {}).get("consequentialHint") is True
+                for descriptor in descriptors
+            ):
+                continue
+            evidence = {
+                "tool": name,
+                "completed_results": len(results),
+                "confirmation_declared": name in declared,
+            }
+            if name not in declared:
+                message = (
+                    f"consequential tool {name!r} completed without a scenario "
+                    "confirmation declaration"
+                )
+                self.recorder.add(
+                    "system",
+                    "consequential_confirmation.fail",
+                    name=name,
+                    data=evidence | {"error": message},
+                )
+                raise InvariantError(message)
+            self.recorder.add(
+                "system",
+                "consequential_confirmation.pass",
+                name=name,
                 data=evidence,
             )
 

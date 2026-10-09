@@ -106,6 +106,11 @@ def _inventory_entry(tool: dict[str, Any], index: int) -> dict[str, Any]:
         },
         "annotation_quality": annotation_quality,
         "annotations": annotations if isinstance(annotations, dict) else {},
+        "consequential_hint": (
+            annotations.get("consequentialHint") is True
+            if isinstance(annotations, dict)
+            else False
+        ),
         "registration": {
             "origin": identity.get("origin"),
             "frame": identity.get("frame"),
@@ -835,6 +840,7 @@ class CommandAPI:
             referenced = {action.invoke or action.retry for actions in scenario.actors.values() for action in actions if action.invoke or action.retry}
             if scenario.state:
                 referenced.add(scenario.state.tool)
+            referenced.update(step.tool for step in scenario.confirmations)
             missing = referenced - known
             if missing:
                 raise CommandError(f"scenario references unavailable tools: {sorted(missing)}")
@@ -1438,6 +1444,7 @@ class CommandAPI:
             "4.0": "webmcp-resilience/4",
             "5.0": "webmcp-resilience/5",
             "6.0": "webmcp-resilience/6",
+            "7.0": "webmcp-resilience/7",
         }
         if (
             supported_bundle_versions.get(saved.schema_version) != saved.compatibility.runner
