@@ -117,6 +117,36 @@ as ordinary result invariants. Counts are exposed as
 outputs, result codes, state invariants, and versions. They do not infer or
 prove unchanged business semantics.
 
+## Consequential tool confirmations
+
+Preflight exposes `annotations.consequentialHint` as
+`tool_inventory[].consequential_hint`. When a consequential tool produces a
+completed result, the scenario must declare an application confirmation:
+
+```yaml
+actors:
+  agent:
+    - invoke: delete_record
+confirmations:
+  - tool: delete_record
+    description: User confirmed deletion in the application's own workflow.
+```
+
+Without the matching declaration, the runner records
+`consequential_confirmation.fail` and reports an invariant violation. A
+matching declaration records `consequential_confirmation.pass`.
+
+This tests the application's declared confirmation behavior and the scenario's
+reviewable workflow contract. It does **not** test, trigger, or prove a
+browser confirmation prompt. Chrome documents `consequentialHint` as metadata
+that allows agents and browsers to enforce confirmation for significant or
+non-reversible actions; see the [Imperative API tool
+annotations](https://developer.chrome.com/docs/ai/webmcp/imperative-api#tool-annotations-optional).
+
+The [`examples/consequential-confirmation`](../examples/consequential-confirmation)
+fixture includes a replayable failure without a declaration and a passing
+declared-confirmation variant.
+
 ## Faults
 
 | Fault | Timing | Effect |

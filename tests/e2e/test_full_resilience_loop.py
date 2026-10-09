@@ -229,9 +229,9 @@ def test_cli_full_loop_replays_a_redacted_adversarial_failure(
     assert replay_json["result"]["error_code"] == failure_json["result"]["error_code"] == "invariant_violation"
     assert replay_json["compatibility"]["tool_inventory_fingerprint"] == failure_json["compatibility"]["tool_inventory_fingerprint"]
 
-    # Version 6 records cross-origin registration evidence. Version 2 through
-    # 5 bundles remain replayable when their scenarios do not use newer DSL.
-    for version in ("2.0", "3.0", "4.0", "5.0"):
+    # Version 7 records consequential confirmation declarations. Version 2
+    # through 6 bundles remain replayable when their scenarios use older DSL.
+    for version in ("2.0", "3.0", "4.0", "5.0", "6.0"):
         legacy_bundle = tmp_path / f"version-{version}-bundle.json"
         legacy_payload = json.loads(json.dumps(failure_json))
         legacy_payload["schema_version"] = version

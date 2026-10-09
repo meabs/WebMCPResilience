@@ -39,6 +39,17 @@ Playwright Chromium baseline implements native WebMCP cross-origin behavior;
 the current public docs do not provide a separate milestone for this exact
 combination of iframe, policy, and exposure checks.
 
+## Consequential tool annotations
+
+Checked 2026-10-09 against the [Imperative API tool
+annotations](https://developer.chrome.com/docs/ai/webmcp/imperative-api#tool-annotations-optional).
+Chrome documents `consequentialHint` as metadata for significant or
+non-reversible actions that allows agents and browsers to enforce mandatory
+user confirmation. The documentation does not define a browser-prompt result
+that an application test can observe. Step 7 therefore checks an application's
+scenario-declared confirmation workflow and completed tool result; it does not
+claim to test Chrome's confirmation prompt.
+
 ## Automated tracking
 
 The weekly `demo preflight contract` GitHub Actions job compares the committed
@@ -56,4 +67,5 @@ snapshot changes are reviewed before the weekly schedule.
 | Chrome 155 structured-argument behavior on the local baseline | Simulated with a version-pinned fixture because the local Playwright Chromium baseline is 153. The CI Chrome-beta matrix runs the same capability gate on a newer channel when available; it skips with a reason below 155. |
 | Chrome 153 unregister behavior below the capability threshold | Intentionally skipped with recorded `fault.skipped` evidence; it must never fail a run solely because the browser is older. |
 | Native cross-origin WebMCP validation on the local baseline | Simulated through the compatibility-host fixture because Chromium 153 does not provide native WebMCP evidence. The fixture is explicitly documented as non-conformance coverage. |
+| Browser confirmation prompt behavior for `consequentialHint` | Not asserted. The Step 7 invariant tests application workflow declarations and result completion, not a browser UI prompt. |
 | Future post-157 status | Not asserted until Chrome Status or another public Chrome source provides a verified update. |
