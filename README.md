@@ -234,8 +234,8 @@ compatibility, redacted tool-contract inventory, schedule, trace, observable
 state, approvals, artifact metadata, outcome, replay decision, and replay command. `diff`
 compares two existing bundles without launching a browser.
 
-New bundles use version 5.0; replay continues to accept version 2.0, 3.0, and
-4.0 bundles. The CLI JSON envelope's `contract_version: "1.0"` is a separate
+New bundles use version 6.0; replay continues to accept version 2.0 through
+5.0 bundles. The CLI JSON envelope's `contract_version: "1.0"` is a separate
 CLI-response contract, not the evidence bundle version.
 
 ## Scenario in one screen
@@ -281,6 +281,8 @@ optional tool-contract assertions, see the [scenario and replay guide](docs/scen
 - **Common failure conditions** — test slow responses, timeouts, duplicate
   calls, cancellations, unregister-during-invoke (Chrome 153+), navigation,
   and HTTP failures deliberately.
+- **Cross-origin discovery boundaries** — record each discovered tool's
+  registration origin and frame, then assert explicit `from_origins` gating.
 - **Useful failure evidence** — when a rule breaks, the tool reduces the run
   to the smallest case that still shows the problem and saves it for replay.
 - **Safe replay** — saved evidence checks that the browser and available tools

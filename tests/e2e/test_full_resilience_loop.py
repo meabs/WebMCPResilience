@@ -229,15 +229,17 @@ def test_cli_full_loop_replays_a_redacted_adversarial_failure(
     assert replay_json["result"]["error_code"] == failure_json["result"]["error_code"] == "invariant_violation"
     assert replay_json["compatibility"]["tool_inventory_fingerprint"] == failure_json["compatibility"]["tool_inventory_fingerprint"]
 
-    # Version 5 records safer replay commands. Version 2 through 4 bundles
-    # remain replayable when their scenarios do not use newer fault semantics.
-    for version in ("2.0", "3.0", "4.0"):
+    # Version 6 records cross-origin registration evidence. Version 2 through
+    # 5 bundles remain replayable when their scenarios do not use newer DSL.
+    for version in ("2.0", "3.0", "4.0", "5.0"):
         legacy_bundle = tmp_path / f"version-{version}-bundle.json"
         legacy_payload = json.loads(json.dumps(failure_json))
         legacy_payload["schema_version"] = version
         legacy_payload["contract_version"] = version
         legacy_payload["compatibility"]["bundle_version"] = version
         legacy_payload["compatibility"]["runner"] = f"webmcp-resilience/{version[0]}"
+        for tool in legacy_payload["tool_inventory"]:
+            tool.pop("identity", None)
         if version == "2.0":
             legacy_payload["inventory_contract"]["fingerprint_policy"].pop(
                 "drift_policy", None

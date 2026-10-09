@@ -145,6 +145,47 @@ fixture demonstrates both outcomes. Its vulnerable mode mistakes
 unregistration for invocation cancellation and leaves partial state; its safe
 mode lets the already-started invocation complete.
 
+## Cross-origin discovery
+
+Preflight records each discovered tool's registration origin and frame at
+`preflight.tool_inventory[].registration`. The saved tool inventory retains the
+same identity evidence. A frame is `top`, `iframe:<index>` when the returned
+tool identifies an iframe in the current document, or `external-frame` when
+the browser exposes a different window without a matching iframe.
+
+Use `cross_origin_invariants` for explicit discovery boundaries:
+
+```yaml
+cross_origin_invariants:
+  - type: listed_with_from_origin
+    tool: partner_read
+    origin: https://partner.example
+  - type: not_listed_without_from_origin
+    tool: partner_read
+    origin: https://partner.example
+  - type: registration_refused_by_default
+    tool: partner_read
+    origin: https://partner.example
+```
+
+`listed_with_from_origin` requires the origin in `.webmcp/config.yaml`
+`from_origins` and requires the matching tool to be discovered.
+`not_listed_without_from_origin` fails when the matching tool is discovered
+while that origin is absent. `registration_refused_by_default` asserts that no
+matching cross-origin tool is visible; it does not claim to observe an iframe's
+registration call directly.
+
+Chrome documents that `getTools()` returns same-origin tools by default, and
+that cross-origin tools require both an explicit `fromOrigins` request and
+explicit exposure by the registering origin. Cross-origin iframe registration
+is disabled by default and requires Permissions Policy delegation. See the
+[Imperative API cross-origin section](https://developer.chrome.com/docs/ai/webmcp/imperative-api#cross-origin-iframes).
+
+The two-origin e2e fixture emulates this documented discovery contract through
+the project's compatibility host because the local baseline does not provide a
+native WebMCP implementation. It tests the runner's evidence and invariant
+handling, not native browser conformance.
+
 ## Scheduling semantics
 
 `--adversarial --seed N` explores bounded permutations of simultaneous,

@@ -39,6 +39,32 @@ def test_scenario_can_explicitly_allow_intentional_navigation() -> None:
     assert scenario.allow_navigation is True
 
 
+def test_cross_origin_invariants_are_typed() -> None:
+    scenario = Scenario.model_validate({
+        "name": "cross-origin",
+        "actors": {"system": [{"action": "wait", "value": "0"}]},
+        "cross_origin_invariants": [{
+            "type": "not_listed_without_from_origin",
+            "tool": "partner_read",
+            "origin": "https://partner.example",
+        }],
+    })
+    assert scenario.cross_origin_invariants[0].tool == "partner_read"
+
+
+def test_cross_origin_invariant_type_is_validated() -> None:
+    with pytest.raises(ValueError, match="cross_origin_invariants"):
+        Scenario.model_validate({
+            "name": "bad-cross-origin",
+            "actors": {"system": [{"action": "wait", "value": "0"}]},
+            "cross_origin_invariants": [{
+                "type": "unknown",
+                "tool": "partner_read",
+                "origin": "https://partner.example",
+            }],
+        })
+
+
 def test_unsupported_timed_fault_is_rejected() -> None:
     with pytest.raises(ValueError, match="unsupported"):
         Fault(type="timeout", at="after_invoke")
