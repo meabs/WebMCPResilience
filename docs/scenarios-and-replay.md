@@ -216,6 +216,27 @@ the project's compatibility host because the local baseline does not provide a
 native WebMCP implementation. It tests the runner's evidence and invariant
 handling, not native browser conformance.
 
+## Declarative form tools
+
+Chrome's declarative API turns a standard form into a tool when it has
+`toolname` and `tooldescription`. Form fields become tool parameters.
+`toolautosubmit` requests automatic form submission when the agent invokes the
+tool; without it, the user submits manually. The
+[Declarative API](https://developer.chrome.com/docs/ai/webmcp/declarative-api)
+also documents `SubmitEvent.agentInvoked` and `respondWith()` for applications
+that handle agent-triggered submissions.
+
+Preflight marks a descriptor as `discovery_mode: declarative` only when the
+browser or compatibility host explicitly reports that fact. It does not infer
+declarative support from ordinary form markup.
+
+The [`examples/declarative-form-race`](../examples/declarative-form-race)
+fixture uses a form with `toolname`, `tooldescription`, and `toolautosubmit`.
+Its vulnerable mode accepts both a human click and an agent invocation; the
+safe mode applies a submit guard. The fixture uses a compatibility host on the
+local Chromium baseline, so it validates discovery and race handling rather
+than native declarative API conformance.
+
 ## Scheduling semantics
 
 `--adversarial --seed N` explores bounded permutations of simultaneous,

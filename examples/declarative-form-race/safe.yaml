@@ -1,0 +1,19 @@
+name: declarative-form-submit-guard
+url: /?mode=safe
+actors:
+  agent:
+    - at: 0ms
+      invoke: submit_note
+      args: {note: agent note}
+    - at: 50ms
+      action: wait
+      value: "0"
+  human:
+    - at: 0ms
+      action: click
+      selector: "#submit"
+    - at: 50ms
+      action: wait
+      value: "0"
+invariants:
+  - submissions.submissions <= 1

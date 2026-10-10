@@ -50,6 +50,21 @@ that an application test can observe. Step 7 therefore checks an application's
 scenario-declared confirmation workflow and completed tool result; it does not
 claim to test Chrome's confirmation prompt.
 
+## Declarative form tools
+
+Checked 2026-10-09 against the [Declarative
+API](https://developer.chrome.com/docs/ai/webmcp/declarative-api). Chrome
+documents `toolname` and `tooldescription` as the form annotations that create
+a tool, with form fields becoming parameters. It documents `toolautosubmit` as
+automatic submission and navigation when a model invokes that tool; otherwise
+the user submits manually. It also documents `SubmitEvent.agentInvoked` and
+`respondWith()` for application handling of agent-triggered submissions.
+
+Chromium 153 has no native declarative WebMCP evidence in this project. Step 8
+therefore uses a compatibility host that reports a declarative descriptor and
+emulates the documented submission behavior. The test proves framework
+discovery and race handling, not native browser declarative conformance.
+
 ## Automated tracking
 
 The weekly `demo preflight contract` GitHub Actions job compares the committed
@@ -68,4 +83,7 @@ snapshot changes are reviewed before the weekly schedule.
 | Chrome 153 unregister behavior below the capability threshold | Intentionally skipped with recorded `fault.skipped` evidence; it must never fail a run solely because the browser is older. |
 | Native cross-origin WebMCP validation on the local baseline | Simulated through the compatibility-host fixture because Chromium 153 does not provide native WebMCP evidence. The fixture is explicitly documented as non-conformance coverage. |
 | Browser confirmation prompt behavior for `consequentialHint` | Not asserted. The Step 7 invariant tests application workflow declarations and result completion, not a browser UI prompt. |
+| Native declarative WebMCP validation on the local baseline | Simulated through the Step 8 compatibility-host fixture because Chromium 153 does not provide native declarative WebMCP evidence. |
+| Step 9 CDP WebMCP domain spike | Not done; optional/time-boxed step. |
+| Step 11 GitHub Action wrapper | Not done; optional and planned only after Steps 0–3. |
 | Future post-157 status | Not asserted until Chrome Status or another public Chrome source provides a verified update. |

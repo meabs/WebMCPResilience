@@ -234,8 +234,8 @@ compatibility, redacted tool-contract inventory, schedule, trace, observable
 state, approvals, artifact metadata, outcome, replay decision, and replay command. `diff`
 compares two existing bundles without launching a browser.
 
-New bundles use version 7.0; replay continues to accept version 2.0 through
-6.0 bundles. The CLI JSON envelope's `contract_version: "1.0"` is a separate
+New bundles use version 8.0; replay continues to accept version 2.0 through
+7.0 bundles. The CLI JSON envelope's `contract_version: "1.0"` is a separate
 CLI-response contract, not the evidence bundle version.
 
 ## Scenario in one screen
@@ -285,6 +285,8 @@ optional tool-contract assertions, see the [scenario and replay guide](docs/scen
   registration origin and frame, then assert explicit `from_origins` gating.
 - **Consequential workflow contracts** — require a scenario-declared
   application confirmation before a consequential tool may complete.
+- **Declarative form races** — discover explicitly reported declarative tools
+  and test agent autosubmit against a simultaneous human form submission.
 - **Useful failure evidence** — when a rule breaks, the tool reduces the run
   to the smallest case that still shows the problem and saves it for replay.
 - **Safe replay** — saved evidence checks that the browser and available tools
@@ -319,6 +321,7 @@ before enabling mutations.
 | [Agent control and safety](docs/agent-control.md) | Local MCP operations, immutable policy, and redaction |
 | [Architecture](docs/architecture.md) | Command seams and concurrency model |
 | [Where it fits](docs/comparison.md) | Boundaries with DevTools, MCP Inspector, Playwright, and browser clouds |
+| [Final recorded run](docs/final-run.md) | Final local versions and verification counts |
 
 ## Boundaries
 

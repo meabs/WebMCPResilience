@@ -54,6 +54,9 @@
         // Explicit scenario expectations may validate this declaration. It is
         // evidence only and is not part of the default compatibility hash.
         semanticVersion: tool.semanticVersion,
+        // Native descriptor shape does not document a declarative marker.
+        // Compatibility fixtures may provide one as explicit evidence.
+        declarative: tool.declarative === true,
         handleId,
         identity: { handleId, name: tool.name, ...identity },
         argumentMode: selectedArgumentMode,
