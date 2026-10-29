@@ -230,6 +230,17 @@ faults:
     duration_ms: 750
 ```
 
+To make replies arrive out of order, give each matching request its own delay
+instead. The first request below is held for 400 ms and every later one for 50 ms,
+so a second save can finish before the first:
+
+```yaml
+faults:
+  - type: http_latency
+    url: "**/api/cart/quantity**"
+    delays_ms: [400, 50]
+```
+
 The runner fetches the real response, holds it for the additional duration, and
 delivers its original status, headers, and body. Routes apply for the scenario
 after initial navigation; use an endpoint requested by the tool. This differs

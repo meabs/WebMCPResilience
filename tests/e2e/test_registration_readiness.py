@@ -153,3 +153,46 @@ async def test_http_latency_preserves_a_real_server_response(client):
         server.shutdown()
         thread.join()
         server.server_close()
+
+
+async def test_http_latency_delays_ms_let_a_later_reply_overtake_an_earlier_one(client):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(b'{"ok": true}')
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        endpoint = f'http://127.0.0.1:{server.server_port}/api/save'
+        await client.page.goto('http://readiness.test/')
+        runner = ScenarioRunner(client.page, Scenario(name='out-of-order', actors={}, faults=[
+            {'type': 'http_latency', 'url': f'{endpoint}*', 'delays_ms': [400, 20]},
+        ]))
+        await runner._install_http_faults()
+        order = await client.page.evaluate('''async url => {
+            const done = [];
+            const first = fetch(url + '?n=1').then(() => done.push('first'));
+            await new Promise((r) => setTimeout(r, 50));
+            const second = fetch(url + '?n=2').then(() => done.push('second'));
+            await Promise.all([first, second]);
+            return done;
+        }''', endpoint)
+        assert order == ['second', 'first']
+        event = runner.recorder.run.events[-1]
+        assert event.name == 'http_latency'
+        assert event.data['delays_ms'] == [400, 20]
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()

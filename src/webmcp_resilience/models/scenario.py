@@ -52,6 +52,8 @@ class Fault(BaseModel):
     type: Literal["latency", "timeout", "http_error", "http_latency", "duplicate_invocation", "cancellation", "unregister_during_invoke", "navigation"]
     tool: str | None = None
     duration_ms: int = Field(0, ge=0)
+    # http_latency only: per-request delays, in request order; the last value repeats. Lets one reply overtake another.
+    delays_ms: list[int] | None = None
     url: str | None = None
     status: int = 503
     at: str | int = "before_invoke"
@@ -65,10 +67,15 @@ class Fault(BaseModel):
     @model_validator(mode="after")
     def supported_timing(self) -> "Fault":
         if self.type == "http_latency":
-            if not self.url or self.duration_ms <= 0:
-                raise ValueError("http_latency requires a url pattern and positive duration_ms")
+            if self.delays_ms is not None:
+                if not self.url or not self.delays_ms or any(d < 0 for d in self.delays_ms) or self.duration_ms:
+                    raise ValueError("http_latency with delays_ms requires a url pattern, a non-empty list of non-negative delays, and no duration_ms")
+            elif not self.url or self.duration_ms <= 0:
+                raise ValueError("http_latency requires a url pattern and positive duration_ms (or delays_ms)")
             if self.tool is not None:
                 raise ValueError("http_latency targets a url pattern, not a tool")
+        elif self.delays_ms is not None:
+            raise ValueError("delays_ms is only supported for http_latency")
         if self.at not in SUPPORTED_FAULT_TIMINGS[self.type]:
             raise ValueError(f"fault timing {self.at!r} is unsupported for {self.type}; supported: {sorted(SUPPORTED_FAULT_TIMINGS[self.type])}")
         if self.yield_point is not None:
