@@ -111,7 +111,7 @@ def init(directory: Path = Path(".webmcp"), from_url: str | None = typer.Option(
 
 
 @app.command()
-def preflight(path: str = "/", ci: bool = typer.Option(False, "--ci"), run_id: str | None = typer.Option(None, "--run-id"), output: Path | None = typer.Option(None, "--output"), json_output: bool = typer.Option(False, "--json")) -> None:
+def preflight(path: str = "/", ci: bool = typer.Option(True, "--ci/--headed"), run_id: str | None = typer.Option(None, "--run-id"), output: Path | None = typer.Option(None, "--output"), json_output: bool = typer.Option(False, "--json")) -> None:
     """Collect non-mutating WebMCP/browser readiness evidence."""
     try:
         api = _api(Path(".webmcp/runs")); bundle = asyncio.run(api.preflight(path, headless=ci, run_id=run_id)); _emit(bundle, json_output=json_output, output=output, api=api)
@@ -129,7 +129,7 @@ def validate(scenario: Path, run_id: str | None = typer.Option(None, "--run-id")
 
 
 @app.command()
-def run(scenario: Path, ci: bool = typer.Option(False, "--ci"), adversarial: bool = typer.Option(False, "--adversarial"), seed: int = typer.Option(0, "--seed"), allow_mutations: bool = typer.Option(False, "--allow-mutations"), schedule_limit: int | None = typer.Option(None, "--schedule-limit", min=1, help="Maximum generated schedules."), exploration_budget_ms: int | None = typer.Option(None, "--exploration-budget-ms", min=1, help="Maximum schedule-generation time."), reduction_max_attempts: int | None = typer.Option(None, "--reduction-max-attempts", min=1), reduction_budget_ms: int | None = typer.Option(None, "--reduction-budget-ms", min=1), run_id: str | None = typer.Option(None, "--run-id"), output: Path | None = typer.Option(None, "--output"), json_output: bool = typer.Option(False, "--json")) -> None:
+def run(scenario: Path, ci: bool = typer.Option(True, "--ci/--headed"), adversarial: bool = typer.Option(False, "--adversarial"), seed: int = typer.Option(0, "--seed"), allow_mutations: bool = typer.Option(False, "--allow-mutations"), schedule_limit: int | None = typer.Option(None, "--schedule-limit", min=1, help="Maximum generated schedules."), exploration_budget_ms: int | None = typer.Option(None, "--exploration-budget-ms", min=1, help="Maximum schedule-generation time."), reduction_max_attempts: int | None = typer.Option(None, "--reduction-max-attempts", min=1), reduction_budget_ms: int | None = typer.Option(None, "--reduction-budget-ms", min=1), run_id: str | None = typer.Option(None, "--run-id"), output: Path | None = typer.Option(None, "--output"), json_output: bool = typer.Option(False, "--json")) -> None:
     """Execute one scenario. Every invocation emits a complete run bundle."""
     try:
         api = _api(Path(".webmcp/runs")); bundle = asyncio.run(api.run(scenario, run_id=run_id, headless=ci, allow_mutations=allow_mutations, adversarial=adversarial, seed=seed, exploration_limit=schedule_limit, exploration_budget_ms=exploration_budget_ms, reduction_max_attempts=reduction_max_attempts, reduction_budget_ms=reduction_budget_ms)); _emit(bundle, json_output=json_output, output=output, api=api)

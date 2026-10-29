@@ -1168,6 +1168,9 @@ class CommandAPI:
                 await client.page.goto(initial_url)
                 readiness = WebMCPAdapter(client.page, self.config.state_script, self.config.from_origins, self.config.webmcp_profile)
                 await readiness.install()
+                # Hydration can expose the API after navigation completes.
+                # Probe the live API rather than fingerprinting its absence.
+                await readiness.wait_for_tools(set(), timeout_ms=self.config.tool_registration_grace_ms)
                 probe = await readiness.probe()
                 fingerprint = hashlib.sha256(json.dumps(redacted(probe), sort_keys=True).encode()).hexdigest()[:16]
                 if expected_capability_fingerprint and fingerprint != expected_capability_fingerprint:
@@ -1227,7 +1230,16 @@ class CommandAPI:
                 runner = ScenarioRunner(client.page, scenario, self.config.state_script, self.config.from_origins, allow_mutations, base_url=self.config.base_url, webmcp_profile=self.config.webmcp_profile, invoke_timeout_ms=self.config.invoke_timeout_ms, state_settle_ms=self.config.state_settle_ms)
                 # Discovery supplies the live compatibility contract. Validate
                 # and compare it before any scenario tool or UI action runs.
-                available_tools = await readiness.get_tools()
+                required_tools = {
+                    action.invoke or action.retry
+                    for actions in scenario.actors.values() for action in actions
+                    if action.invoke or action.retry
+                }
+                if scenario.state:
+                    required_tools.add(scenario.state.tool)
+                available_tools = await readiness.wait_for_tools(
+                    required_tools, timeout_ms=self.config.tool_registration_grace_ms
+                )
                 bundle.compatibility.webmcp_argument_mode = _argument_mode(available_tools)
                 bundle.browser_environment["webmcp_argument_mode"] = bundle.compatibility.webmcp_argument_mode
                 if (expected_webmcp_argument_mode is not None
