@@ -319,7 +319,10 @@ class ScenarioRunner:
                 await self.page.route(pattern, response_handler(fault))
                 data = {"url": pattern}
                 if fault.type == "http_latency":
-                    data["duration_ms"] = fault.duration_ms
+                    if fault.delays_ms:
+                        data["delays_ms"] = list(fault.delays_ms)
+                    else:
+                        data["duration_ms"] = fault.duration_ms
                 else:
                     data["status"] = fault.status
                 self.recorder.add("system", "fault.injected", name=fault.type, data=data)
