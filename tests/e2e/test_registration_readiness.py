@@ -196,3 +196,21 @@ async def test_http_latency_delays_ms_let_a_later_reply_overtake_an_earlier_one(
         server.shutdown()
         thread.join()
         server.server_close()
+async def test_slow_setup_does_not_shrink_the_gap_between_scheduled_actions(client, monkeypatch):
+    await client.page.goto('http://readiness.test/')
+    scenario = Scenario(name='gap', actors={
+        'agent': [{'at': '0ms', 'invoke': 'read'}],
+        'other': [{'at': '200ms', 'invoke': 'read'}],
+    })
+    runner = ScenarioRunner(client.page, scenario)
+    install = runner.adapter.install
+
+    async def slow_install():
+        await install()
+        await asyncio.sleep(0.3)  # setup that takes longer than the first offset
+
+    monkeypatch.setattr(runner.adapter, 'install', slow_install)
+    run = await runner.run()
+    invokes = [event.timestamp_ms for event in run.events if event.type == 'tool.invoke']
+    assert len(invokes) == 2
+    assert invokes[1] - invokes[0] >= 180
