@@ -11,6 +11,7 @@ SUPPORTED_FAULT_TIMINGS: dict[str, set[str]] = {
     "navigation": {"before_invoke", "after_invoke"},
     "timeout": {"before_invoke"},
     "http_error": {"before_invoke"},
+    "http_latency": {"before_invoke"},
 }
 
 
@@ -48,9 +49,9 @@ class TimedAction(BaseModel):
 
 
 class Fault(BaseModel):
-    type: Literal["latency", "timeout", "http_error", "duplicate_invocation", "cancellation", "unregister_during_invoke", "navigation"]
+    type: Literal["latency", "timeout", "http_error", "http_latency", "duplicate_invocation", "cancellation", "unregister_during_invoke", "navigation"]
     tool: str | None = None
-    duration_ms: int = 0
+    duration_ms: int = Field(0, ge=0)
     url: str | None = None
     status: int = 503
     at: str | int = "before_invoke"
@@ -63,6 +64,11 @@ class Fault(BaseModel):
 
     @model_validator(mode="after")
     def supported_timing(self) -> "Fault":
+        if self.type == "http_latency":
+            if not self.url or self.duration_ms <= 0:
+                raise ValueError("http_latency requires a url pattern and positive duration_ms")
+            if self.tool is not None:
+                raise ValueError("http_latency targets a url pattern, not a tool")
         if self.at not in SUPPORTED_FAULT_TIMINGS[self.type]:
             raise ValueError(f"fault timing {self.at!r} is unsupported for {self.type}; supported: {sorted(SUPPORTED_FAULT_TIMINGS[self.type])}")
         if self.yield_point is not None:

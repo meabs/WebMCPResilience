@@ -107,7 +107,7 @@ class ScenarioRunner:
         if self._adapter_stale:
             await self.page.wait_for_load_state("domcontentloaded")
             await self.adapter.install()
-            self._set_tools(await self.adapter.get_tools())
+            self._set_tools(await self.adapter.wait_for_tools(set()))
             self._adapter_stale = False
             self.recorder.add("system", "adapter.reattached", data={"tool_count": len(self.tools)})
 
@@ -311,7 +311,12 @@ class ScenarioRunner:
             pattern = http_route(fault)
             if pattern:
                 await self.page.route(pattern, response_handler(fault))
-                self.recorder.add("system", "fault.injected", name="http_error", data={"url": pattern, "status": fault.status})
+                data = {"url": pattern}
+                if fault.type == "http_latency":
+                    data["duration_ms"] = fault.duration_ms
+                else:
+                    data["status"] = fault.status
+                self.recorder.add("system", "fault.injected", name=fault.type, data=data)
 
     async def _run_at(self, offset: int, actor: str, action: TimedAction) -> None:
         await asyncio.sleep(max(0, offset - round((time.monotonic() - self.recorder.started) * 1000)) / 1000)
@@ -435,6 +440,9 @@ class ScenarioRunner:
                     raise
                 raise classified from error
             name, event = action.invoke or action.retry, "tool.invoke" if action.invoke else "tool.retry"
+            if name not in self._tool_candidates:
+                # A destination page can register tools after DOMContentLoaded.
+                self._set_tools(await self.adapter.wait_for_tools({name}))
             descriptor = self._descriptor_for(name, action)
             if not self.allow_mutations and not (descriptor.get("annotations") or {}).get("readOnlyHint", False):
                 raise PermissionError(f"{name} can mutate application state; rerun with --allow-mutations")

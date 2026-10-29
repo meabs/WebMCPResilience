@@ -92,3 +92,27 @@ def test_failed_bundle_json_contains_one_structured_handoff_document(tmp_path: P
     assert handoff["observed_state"]["claims"]["active"] == 2
     assert handoff["capability_fingerprint"] == "fingerprint"
     assert handoff["replay_command"][0:2] == ["webmcp", "replay"]
+
+
+
+@pytest.mark.parametrize('command', ['run', 'test', 'preflight', 'inspect', 'replay'])
+@pytest.mark.parametrize(('flag', 'expected'), [(None, True), ('--ci', True), ('--headed', False)])
+def test_browser_commands_default_headless(monkeypatch, command, flag, expected):
+    from types import SimpleNamespace
+    captured = {}
+
+    async def execute(*args, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(result={'passed': True})
+
+    api = SimpleNamespace(run=execute, preflight=execute, replay=execute)
+    monkeypatch.setattr('webmcp_resilience.cli._api', lambda *_: api)
+    monkeypatch.setattr('webmcp_resilience.cli._emit', lambda *args, **kwargs: None)
+    args = [command]
+    if command in {'run', 'test', 'replay'}:
+        args.append('input.yaml')
+    if flag:
+        args.append(flag)
+    result = CliRunner().invoke(app, args)
+    assert result.exit_code == 0, result.output
+    assert captured['headless'] is expected

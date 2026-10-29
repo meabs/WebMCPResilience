@@ -198,17 +198,47 @@ milestones.
 
 ### Common setup problems
 
+- **Running on a machine without a display:** `run` (and its `test` alias),
+  `preflight` (and `inspect`), and `replay` run headless by default. `--ci`
+  remains supported; use `--headed` to open a visible browser.
 - **A native tool rejects its arguments:** older Chrome WebMCP builds use JSON
   strings. Set `webmcp_profile: legacy-string`. The saved bundle records the
   argument mode and replay rejects a different one.
 - **Preflight finds no tools:** the page may be stuck while registering them.
   Check its `registerTool` call, including options such as `AbortSignal`, and
   increase `tool_registration_grace_ms` if registration is simply slow.
+  `run` and `replay` also wait for scenario invocation/retry tools and the state
+  tool before validating the live tool contract, using this same budget
+  (2,000 ms by default; `0` checks immediately).
+- **Tools disappear after a reload:** the adapter is installed in each new
+  document and rediscovers live descriptors after navigation. If the next tool
+  has not registered yet, the runner waits up to 3,000 ms before reporting it
+  missing. In-flight calls destroyed by navigation still fail; set
+  `allow_navigation: true` for tools intentionally replacing their document.
 - **A run stops with `tool_invoke_timeout`:** the tool did not finish within
   `invoke_timeout_ms` (15 seconds by default). This often means a declarative
   tool is waiting for a browser-side confirmation, rather than an app bug.
 - **A selector matches more than one element:** make it more specific, use
   `:nth-of-type(n)`, or use a role-based selector.
+
+To simulate a slow server response during tool execution, add a URL-scoped fault:
+
+```yaml
+faults:
+  - type: http_latency
+    url: "**/api/claims**"
+    duration_ms: 750
+```
+
+The runner fetches the real response, holds it for the additional duration, and
+delivers its original status, headers, and body. Routes apply for the scenario
+after initial navigation; use an endpoint requested by the tool. This differs
+from `latency`, which delays tool dispatch or result handling. The URL pattern
+and positive duration are required; `tool` is unsupported for this fault. Match
+only the intended endpoints: requests already handled by a service worker cannot
+be intercepted, and overlapping HTTP fault patterns use Playwright route order
+(the last registered matching route handles the request). The fault configuration
+is saved in bundles and reapplied during replay and reduction.
 
 ## A complete workflow
 

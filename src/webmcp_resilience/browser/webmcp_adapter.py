@@ -17,9 +17,13 @@ class WebMCPAdapter:
         if profile not in {"auto", "native-object", "legacy-string"}:
             raise ValueError(f"unsupported WebMCP profile: {profile}")
         self.page, self.state_script, self.from_origins, self.profile = page, state_script, from_origins or [], profile
+        self._init_script_installed = False
 
     async def install(self) -> None:
         source = Path(__file__).with_name("adapter.js").read_text()
+        if not self._init_script_installed:
+            await self.page.add_init_script(source)
+            self._init_script_installed = True
         await self.page.evaluate(source)
 
     async def get_tools(self) -> list[dict[str, Any]]:
@@ -34,7 +38,14 @@ class WebMCPAdapter:
     async def wait_for_tools(self, names: set[str], timeout_ms: int = 3000) -> list[dict[str, Any]]:
         deadline = asyncio.get_running_loop().time() + timeout_ms / 1000
         while True:
-            tools = await self.get_tools()
+            try:
+                tools = await self.get_tools()
+            except WebMCPUnavailable:
+                # The API itself may appear during application hydration.
+                if asyncio.get_running_loop().time() >= deadline:
+                    raise
+                await asyncio.sleep(0.05)
+                continue
             if names.issubset({tool["name"] for tool in tools}):
                 return tools
             if asyncio.get_running_loop().time() >= deadline:

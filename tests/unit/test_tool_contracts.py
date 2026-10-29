@@ -353,6 +353,9 @@ def test_replay_allows_unknown_annotation_added_by_default(
         async def install(self) -> None:
             pass
 
+        async def wait_for_tools(self, names, timeout_ms=3000):
+            return await self.get_tools()
+
         async def probe(self) -> dict:
             return {"api": {"available": True}, "runtime": {}}
 
@@ -541,6 +544,9 @@ def test_replay_contract_mismatch_raises_structured_error_before_execution(tmp_p
         async def install(self) -> None:
             pass
 
+        async def wait_for_tools(self, names, timeout_ms=3000):
+            return await self.get_tools()
+
         async def probe(self) -> dict:
             return {"api": {"available": True}, "runtime": {}}
 
@@ -688,6 +694,9 @@ def test_replay_description_drift_follows_recorded_fingerprint_policy(
 
         async def install(self) -> None:
             pass
+
+        async def wait_for_tools(self, names, timeout_ms=3000):
+            return await self.get_tools()
 
         async def probe(self) -> dict:
             return {"api": {"available": True}, "runtime": {}}

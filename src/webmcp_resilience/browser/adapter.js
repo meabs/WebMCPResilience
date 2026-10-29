@@ -1,4 +1,5 @@
 (() => {
+  if (window.__webmcp_resilience) return;
   const primaryContext = () => document.modelContext;
   const legacyNavigatorContext = () => {
     // Chrome documents document.modelContext as the canonical entry point.
@@ -7,6 +8,15 @@
     return navigator.modelContext;
   };
   const context = () => primaryContext() ?? legacyNavigatorContext();
+  const observedContexts = new WeakSet();
+  const observeContext = (host) => {
+    if (host?.addEventListener && !observedContexts.has(host)) {
+      host.addEventListener('toolchange', () => {
+        window.__webmcp_resilience.lifecycle.push({ type: 'toolchange', timestamp: Date.now() });
+      });
+      observedContexts.add(host);
+    }
+  };
   const registrationIdentity = (tool) => {
     const origin = typeof tool.origin === 'string' ? tool.origin : location.origin;
     if (!tool.window || tool.window === window) return { origin, frame: 'top' };
@@ -18,6 +28,7 @@
   const requireContext = () => {
     const value = context();
     if (!value) throw new Error("WebMCP is unavailable: document.modelContext was not exposed by this browser/page.");
+    observeContext(value);
     return value;
   };
   const argumentMode = (profile, host) => {
@@ -181,7 +192,5 @@
   };
   // Installation must remain possible on an unsupported browser so preflight
   // can emit evidence instead of failing before it has inspected anything.
-  context()?.addEventListener?.('toolchange', () => {
-    window.__webmcp_resilience.lifecycle.push({ type: 'toolchange', timestamp: Date.now() });
-  });
+  observeContext(context());
 })();

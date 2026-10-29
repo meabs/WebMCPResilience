@@ -158,6 +158,7 @@ declared-confirmation variant.
 | `unregister_during_invoke` | `before_invoke` | Aborts a tool registration while its invocation is pending. |
 | `navigation` | `before_invoke`, `after_invoke` | Performs declared browser navigation. |
 | `http_error` | `before_invoke` | Routes matching browser HTTP traffic to a declared response status. |
+| `http_latency` | `before_invoke` | Holds a real response for an extra `duration_ms`, preserving status, headers, and body. Requires a `url` pattern and a positive duration; does not accept `tool`. |
 
 Fault timing is explicit. Unsupported timing combinations are validation errors.
 
