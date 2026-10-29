@@ -150,6 +150,9 @@ class ScenarioRunner:
         else:
             await self.adapter.start_tool(name, args, invocation_id)
 
+    def _schedule_clock(self) -> float:
+        return getattr(self, "_schedule_started", None) or self.recorder.started
+
     async def run(self, schedule: list[ScheduledAction] | None = None) -> TraceRun:
         await self.adapter.install()
         self.recorder.add("system", "scenario.start")
@@ -163,6 +166,9 @@ class ScenarioRunner:
             self.recorder.add("system", "tool.discovered", name=tool.get("name"), data=tool)
         await self._record_lifecycle()
         scheduled = schedule or [(action.offset_ms, actor, action) for actor, actions in self.scenario.actors.items() for action in actions]
+        # Offsets count from here, after setup: installing the adapter and discovering tools can take a variable
+        # time (an init script, late registration), and must not shrink the gaps between scheduled actions.
+        self._schedule_started = time.monotonic()
         grouped: dict[int, list[ScheduledAction]] = {}
         for item in scheduled:
             grouped.setdefault(item[0], []).append(item)
@@ -319,7 +325,7 @@ class ScenarioRunner:
                 self.recorder.add("system", "fault.injected", name=fault.type, data=data)
 
     async def _run_at(self, offset: int, actor: str, action: TimedAction) -> None:
-        await asyncio.sleep(max(0, offset - round((time.monotonic() - self.recorder.started) * 1000)) / 1000)
+        await asyncio.sleep(max(0, offset - round((time.monotonic() - self._schedule_clock()) * 1000)) / 1000)
         self.recorder.add(actor, "scheduler.yield", data={"point": "before_action", "offset_ms": offset})
         await asyncio.sleep(0)
         await self._execute(actor, action)
@@ -338,7 +344,7 @@ class ScenarioRunner:
         if len(entries) == 1:
             await self._run_at(*entries[0])
             return
-        await asyncio.sleep(max(0, offset - round((time.monotonic() - self.recorder.started) * 1000)) / 1000)
+        await asyncio.sleep(max(0, offset - round((time.monotonic() - self._schedule_clock()) * 1000)) / 1000)
         for _, actor, _ in entries:
             self.recorder.add(actor, "scheduler.yield", data={"point": "before_action", "offset_ms": offset})
         await asyncio.sleep(0)
